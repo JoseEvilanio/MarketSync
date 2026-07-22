@@ -12,6 +12,7 @@ export function errorHandler(
   // Erros de validação do Zod
   if (err instanceof ZodError) {
     const messages = err.errors.map((e) => `${e.path.join('.')}: ${e.message}`);
+    logger.warn(`[ZodError 422] ${req.method} ${req.url}:`, messages);
     res.status(422).json({ erro: 'Dados inválidos', detalhes: messages });
     return;
   }
