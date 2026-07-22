@@ -4,16 +4,21 @@ import prisma from '../config/prisma';
 import { AppError } from '../utils/AppError';
 import { AuthRequest } from '../middlewares/auth.middleware';
 
+const optionalString = z.preprocess(
+  (val) => (val === '' || val === null ? null : val),
+  z.string().nullable().optional()
+);
+
 const clienteSchema = z.object({
-  nome: z.string().min(2),
-  cpf: z.string().optional(),
-  telefone: z.string().optional(),
-  whatsapp: z.string().optional(),
-  endereco: z.string().optional(),
-  cidade: z.string().optional(),
-  bairro: z.string().optional(),
-  limiteCredito: z.number().min(0).default(0),
-  observacoes: z.string().optional(),
+  nome: z.string().min(2, 'Nome deve ter no mínimo 2 caracteres'),
+  cpf: optionalString,
+  telefone: optionalString,
+  whatsapp: optionalString,
+  endereco: optionalString,
+  cidade: optionalString,
+  bairro: optionalString,
+  limiteCredito: z.coerce.number().min(0).default(0),
+  observacoes: optionalString,
   ativo: z.boolean().default(true),
 });
 

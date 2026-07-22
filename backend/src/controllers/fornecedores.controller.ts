@@ -4,17 +4,27 @@ import prisma from '../config/prisma';
 import { AppError } from '../utils/AppError';
 import { AuthRequest } from '../middlewares/auth.middleware';
 
+const optionalString = z.preprocess(
+  (val) => (val === '' || val === null ? null : val),
+  z.string().nullable().optional()
+);
+
+const optionalEmail = z.preprocess(
+  (val) => (val === '' || val === null ? null : val),
+  z.string().email('E-mail inválido').nullable().optional()
+);
+
 const fornecedorSchema = z.object({
-  nome: z.string().min(2),
-  razaoSocial: z.string().optional(),
-  cnpj: z.string().optional(),
-  telefone: z.string().optional(),
-  whatsapp: z.string().optional(),
-  email: z.string().email().optional().or(z.literal('')),
-  endereco: z.string().optional(),
-  cidade: z.string().optional(),
-  bairro: z.string().optional(),
-  contato: z.string().optional(),
+  nome: z.string().min(2, 'Nome deve ter no mínimo 2 caracteres'),
+  razaoSocial: optionalString,
+  cnpj: optionalString,
+  telefone: optionalString,
+  whatsapp: optionalString,
+  email: optionalEmail,
+  endereco: optionalString,
+  cidade: optionalString,
+  bairro: optionalString,
+  contato: optionalString,
   ativo: z.boolean().default(true),
 });
 

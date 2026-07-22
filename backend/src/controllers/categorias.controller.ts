@@ -4,9 +4,14 @@ import prisma from '../config/prisma';
 import { AppError } from '../utils/AppError';
 import { AuthRequest } from '../middlewares/auth.middleware';
 
+const optionalString = z.preprocess(
+  (val) => (val === '' || val === null ? null : val),
+  z.string().nullable().optional()
+);
+
 const schema = z.object({
-  nome: z.string().min(2),
-  descricao: z.string().optional(),
+  nome: z.string().min(2, 'Nome deve ter no mínimo 2 caracteres'),
+  descricao: optionalString,
   ativo: z.boolean().default(true),
 });
 

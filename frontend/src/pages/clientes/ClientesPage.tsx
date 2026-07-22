@@ -39,14 +39,29 @@ export default function ClientesPage() {
   });
 
   const salvar = useMutation({
-    mutationFn: (d: Form) =>
-      editando ? clientesService.atualizar(editando.id, d) : clientesService.criar(d),
+    mutationFn: (d: Form) => {
+      const payload = {
+        ...d,
+        cpf: d.cpf || null,
+        telefone: d.telefone || null,
+        whatsapp: d.whatsapp || null,
+        endereco: d.endereco || null,
+        cidade: d.cidade || null,
+        bairro: d.bairro || null,
+        observacoes: d.observacoes || null,
+      };
+      return editando ? clientesService.atualizar(editando.id, payload) : clientesService.criar(payload);
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['clientes'] });
       toast.success(editando ? 'Cliente atualizado' : 'Cliente cadastrado');
       setModalOpen(false);
       setEditando(null);
       reset();
+    },
+    onError: (err: any) => {
+      const msg = err.response?.data?.erro || err.response?.data?.detalhes?.join(', ') || 'Erro ao salvar cliente';
+      toast.error(msg);
     },
   });
 

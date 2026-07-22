@@ -21,14 +21,31 @@ export default function FornecedoresPage() {
   const { register, handleSubmit, reset } = useForm<any>();
 
   const salvar = useMutation({
-    mutationFn: (d: any) =>
-      editando ? fornecedoresService.atualizar(editando.id, d) : fornecedoresService.criar(d),
+    mutationFn: (d: any) => {
+      const payload = {
+        nome: d.nome,
+        razaoSocial: d.razaoSocial || null,
+        cnpj: d.cnpj || null,
+        telefone: d.telefone || null,
+        whatsapp: d.whatsapp || null,
+        email: d.email || null,
+        endereco: d.endereco || null,
+        cidade: d.cidade || null,
+        contato: d.contato || null,
+        ativo: d.ativo ?? true,
+      };
+      return editando ? fornecedoresService.atualizar(editando.id, payload) : fornecedoresService.criar(payload);
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['fornecedores'] });
       toast.success(editando ? 'Fornecedor atualizado' : 'Fornecedor cadastrado');
       setModalOpen(false);
       setEditando(null);
       reset();
+    },
+    onError: (err: any) => {
+      const msg = err.response?.data?.erro || err.response?.data?.detalhes?.join(', ') || 'Erro ao salvar fornecedor';
+      toast.error(msg);
     },
   });
 
@@ -39,13 +56,24 @@ export default function FornecedoresPage() {
 
   function abrirEditar(f: any) {
     setEditando(f);
-    reset(f);
+    reset({
+      nome: f.nome || '',
+      razaoSocial: f.razaoSocial || '',
+      cnpj: f.cnpj || '',
+      telefone: f.telefone || '',
+      whatsapp: f.whatsapp || '',
+      email: f.email || '',
+      endereco: f.endereco || '',
+      cidade: f.cidade || '',
+      contato: f.contato || '',
+      ativo: f.ativo ?? true,
+    });
     setModalOpen(true);
   }
 
   function abrirNovo() {
     setEditando(null);
-    reset({});
+    reset({ nome: '', razaoSocial: '', cnpj: '', telefone: '', whatsapp: '', email: '', endereco: '', cidade: '', contato: '', ativo: true });
     setModalOpen(true);
   }
 
