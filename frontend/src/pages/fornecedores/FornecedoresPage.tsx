@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { fornecedoresService } from '@/services/api';
+import { formatCNPJ, formatPhone } from '@/utils/format';
 import Modal from '@/components/ui/Modal';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 
@@ -18,7 +19,7 @@ export default function FornecedoresPage() {
     queryFn: () => fornecedoresService.listar({ q, page, limit: 20 }),
   });
 
-  const { register, handleSubmit, reset } = useForm<any>();
+  const { register, handleSubmit, reset, setValue } = useForm<any>();
 
   const salvar = useMutation({
     mutationFn: (d: any) => {
@@ -59,9 +60,9 @@ export default function FornecedoresPage() {
     reset({
       nome: f.nome || '',
       razaoSocial: f.razaoSocial || '',
-      cnpj: f.cnpj || '',
-      telefone: f.telefone || '',
-      whatsapp: f.whatsapp || '',
+      cnpj: formatCNPJ(f.cnpj || ''),
+      telefone: formatPhone(f.telefone || ''),
+      whatsapp: formatPhone(f.whatsapp || ''),
       email: f.email || '',
       endereco: f.endereco || '',
       cidade: f.cidade || '',
@@ -124,8 +125,8 @@ export default function FornecedoresPage() {
                       <p className="text-body-sm font-medium text-on-surface">{f.nome}</p>
                       {f.razaoSocial && <p className="text-label-md text-on-surface-variant">{f.razaoSocial}</p>}
                     </td>
-                    <td className="td text-data-mono text-on-surface-variant">{f.cnpj || '—'}</td>
-                    <td className="td text-body-sm text-on-surface-variant">{f.telefone || '—'}</td>
+                    <td className="td text-data-mono text-on-surface-variant">{f.cnpj ? formatCNPJ(f.cnpj) : '—'}</td>
+                    <td className="td text-body-sm text-on-surface-variant">{f.telefone ? formatPhone(f.telefone) : '—'}</td>
                     <td className="td text-body-sm text-on-surface-variant">{f.contato || '—'}</td>
                     <td className="td text-body-sm text-on-surface-variant truncate max-w-xs">{f.email || '—'}</td>
                     <td className="td">
@@ -176,15 +177,30 @@ export default function FornecedoresPage() {
           </div>
           <div>
             <label className="label">CNPJ</label>
-            <input {...register('cnpj')} className="input" placeholder="00.000.000/0001-00" />
+            <input
+              {...register('cnpj')}
+              onChange={(e) => setValue('cnpj', formatCNPJ(e.target.value))}
+              className="input"
+              placeholder="00.000.000/0001-00"
+            />
           </div>
           <div>
             <label className="label">Telefone</label>
-            <input {...register('telefone')} className="input" placeholder="(00) 0000-0000" />
+            <input
+              {...register('telefone')}
+              onChange={(e) => setValue('telefone', formatPhone(e.target.value))}
+              className="input"
+              placeholder="(00) 0000-0000"
+            />
           </div>
           <div>
             <label className="label">WhatsApp</label>
-            <input {...register('whatsapp')} className="input" placeholder="(00) 00000-0000" />
+            <input
+              {...register('whatsapp')}
+              onChange={(e) => setValue('whatsapp', formatPhone(e.target.value))}
+              className="input"
+              placeholder="(00) 00000-0000"
+            />
           </div>
           <div className="col-span-2">
             <label className="label">E-mail</label>

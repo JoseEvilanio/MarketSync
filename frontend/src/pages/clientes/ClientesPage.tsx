@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import toast from 'react-hot-toast';
 import { clientesService } from '@/services/api';
-import { formatDateTime } from '@/utils/format';
+import { formatCPF, formatPhone } from '@/utils/format';
 import Modal from '@/components/ui/Modal';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 
@@ -34,7 +34,7 @@ export default function ClientesPage() {
     queryFn: () => clientesService.listar({ q, page, limit: 20 }),
   });
 
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<Form>({
+  const { register, handleSubmit, reset, setValue, formState: { errors } } = useForm<Form>({
     resolver: zodResolver(schema),
   });
 
@@ -72,13 +72,23 @@ export default function ClientesPage() {
 
   function abrirEditar(c: any) {
     setEditando(c);
-    reset({ nome: c.nome, cpf: c.cpf || '', telefone: c.telefone || '', whatsapp: c.whatsapp || '', endereco: c.endereco || '', cidade: c.cidade || '', bairro: c.bairro || '', limiteCredito: Number(c.limiteCredito), observacoes: c.observacoes || '' });
+    reset({
+      nome: c.nome || '',
+      cpf: formatCPF(c.cpf || ''),
+      telefone: formatPhone(c.telefone || ''),
+      whatsapp: formatPhone(c.whatsapp || ''),
+      endereco: c.endereco || '',
+      cidade: c.cidade || '',
+      bairro: c.bairro || '',
+      limiteCredito: Number(c.limiteCredito),
+      observacoes: c.observacoes || '',
+    });
     setModalOpen(true);
   }
 
   function abrirNovo() {
     setEditando(null);
-    reset({ limiteCredito: 0 });
+    reset({ nome: '', cpf: '', telefone: '', whatsapp: '', endereco: '', cidade: '', bairro: '', limiteCredito: 0, observacoes: '' });
     setModalOpen(true);
   }
 
@@ -131,8 +141,8 @@ export default function ClientesPage() {
                       <p className="text-body-sm font-medium text-on-surface">{c.nome}</p>
                       {c.observacoes && <p className="text-label-md text-on-surface-variant truncate max-w-xs">{c.observacoes}</p>}
                     </td>
-                    <td className="td text-data-mono text-on-surface-variant">{c.cpf || '—'}</td>
-                    <td className="td text-body-sm text-on-surface-variant">{c.telefone || c.whatsapp || '—'}</td>
+                    <td className="td text-data-mono text-on-surface-variant">{c.cpf ? formatCPF(c.cpf) : '—'}</td>
+                    <td className="td text-body-sm text-on-surface-variant">{c.telefone ? formatPhone(c.telefone) : c.whatsapp ? formatPhone(c.whatsapp) : '—'}</td>
                     <td className="td text-body-sm text-on-surface-variant">{c.cidade || '—'}</td>
                     <td className="td text-right text-data-mono">
                       {Number(c.limiteCredito) > 0 ? (
@@ -185,15 +195,30 @@ export default function ClientesPage() {
           </div>
           <div>
             <label className="label">CPF</label>
-            <input {...register('cpf')} className="input" placeholder="000.000.000-00" />
+            <input
+              {...register('cpf')}
+              onChange={(e) => setValue('cpf', formatCPF(e.target.value))}
+              className="input"
+              placeholder="000.000.000-00"
+            />
           </div>
           <div>
             <label className="label">Telefone</label>
-            <input {...register('telefone')} className="input" placeholder="(00) 00000-0000" />
+            <input
+              {...register('telefone')}
+              onChange={(e) => setValue('telefone', formatPhone(e.target.value))}
+              className="input"
+              placeholder="(00) 00000-0000"
+            />
           </div>
           <div>
             <label className="label">WhatsApp</label>
-            <input {...register('whatsapp')} className="input" placeholder="(00) 00000-0000" />
+            <input
+              {...register('whatsapp')}
+              onChange={(e) => setValue('whatsapp', formatPhone(e.target.value))}
+              className="input"
+              placeholder="(00) 00000-0000"
+            />
           </div>
           <div>
             <label className="label">Limite de Crédito (R$)</label>
