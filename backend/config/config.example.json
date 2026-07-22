@@ -1,0 +1,28 @@
+{
+  "empresa": "Mercadinho Local",
+  "api": {
+    "host": "localhost",
+    "porta": 3001
+  },
+  "database": {
+    "host": "localhost",
+    "porta": 5432,
+    "nome": "mercadopro",
+    "usuario": "postgres",
+    "senha": "sua_senha_aqui"
+  },
+  "backup": {
+    "diretorio": "../backups",
+    "hora": "22:00",
+    "maximo": 30
+  },
+  "impressora": {
+    "cupom": "",
+    "etiquetas": ""
+  },
+  "sistema": {
+    "primeiroAcesso": true,
+    "versao": "1.0.0",
+    "logDir": "../logs"
+  }
+}

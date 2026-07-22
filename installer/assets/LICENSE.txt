@@ -1,0 +1,23 @@
+TERMOS DE USO — MercadoPro ERP Local
+=====================================
+
+1. LICENÇA DE USO
+   Este software é licenciado para uso em um único computador (Single PC).
+   É permitido fazer cópias de backup do instalador.
+
+2. RESTRIÇÕES
+   É proibido redistribuir, vender, sublicenciar ou modificar o software
+   sem autorização expressa do desenvolvedor.
+
+3. DADOS E PRIVACIDADE
+   O sistema opera 100% localmente. Nenhum dado é enviado à internet.
+   O usuário é responsável pelo backup e segurança dos seus dados.
+
+4. ISENÇÃO DE GARANTIA
+   O software é fornecido "como está", sem garantias de qualquer tipo.
+   O desenvolvedor não se responsabiliza por perda de dados.
+
+5. SUPORTE
+   Suporte técnico disponível pelos canais oficiais do desenvolvedor.
+
+Ao clicar em "Aceito", você concorda com estes termos.

@@ -1,0 +1,85 @@
+import { Response } from 'express';
+import path from 'path';
+import fs from 'fs';
+import multer from 'multer';
+import os from 'os';
+import { runBackup, listarBackups, exportarSistema, restaurarSistema, getBackupDir } from '../utils/backup';
+import { logEvent } from '../utils/logger';
+import { AuthRequest } from '../middlewares/auth.middleware';
+import { AppError } from '../utils/AppError';
+
+// Multer: uploads temporários em pasta do sistema
+export const uploadBackup = multer({
+  dest: os.tmpdir(),
+  limits: { fileSize: 2 * 1024 * 1024 * 1024 }, // 2 GB
+  fileFilter(_req, file, cb) {
+    if (file.originalname.endsWith('.backup') || file.mimetype === 'application/zip') {
+      cb(null, true);
+    } else {
+      cb(new AppError('Apenas arquivos .backup são aceitos', 400) as unknown as null, false);
+    }
+  },
+});
+
+export async function executarBackup(req: AuthRequest, res: Response): Promise<void> {
+  const result = await runBackup(req.usuario?.id);
+  res.json({
+    mensagem: 'Backup realizado com sucesso',
+    arquivo: path.basename(result.arquivo),
+    tamanho_bytes: result.tamanho_bytes,
+    duracao_ms: result.duracao_ms,
+  });
+}
+
+export async function listar(_req: AuthRequest, res: Response): Promise<void> {
+  const backups = listarBackups();
+  res.json(backups);
+}
+
+export async function downloadBackup(req: AuthRequest, res: Response): Promise<void> {
+  const nomeParam = (req.params.nome || req.query.nome || '') as string;
+  const safeName = path.basename(nomeParam);
+
+  if (!safeName || (!safeName.endsWith('.zip') && !safeName.endsWith('.backup'))) {
+    throw new AppError('Nome de arquivo inválido', 400);
+  }
+
+  const backupDir = getBackupDir();
+  const filePath = path.join(backupDir, safeName);
+
+  if (!fs.existsSync(filePath)) {
+    throw new AppError('Arquivo de backup não encontrado', 404);
+  }
+
+  res.download(filePath, safeName);
+}
+
+export async function exportar(req: AuthRequest, res: Response): Promise<void> {
+  const result = await exportarSistema(req.usuario?.id);
+
+  logEvent({
+    nivel: 'info',
+    modulo: 'backup',
+    mensagem: 'Download de exportação iniciado',
+    usuario: req.usuario?.id,
+    dados: { arquivo: path.basename(result.arquivo) },
+  });
+
+  res.download(result.arquivo, path.basename(result.arquivo));
+}
+
+export async function restaurar(req: AuthRequest, res: Response): Promise<void> {
+  // Proteção contra chamada acidental
+  if (req.headers['x-confirm'] !== 'true') {
+    throw new AppError(
+      'Operação destrutiva requer header X-Confirm: true',
+      400
+    );
+  }
+
+  const file = req.file;
+  if (!file) throw new AppError('Arquivo .backup não enviado', 400);
+
+  const result = await restaurarSistema(file.path, req.usuario?.id);
+  res.json(result);
+}

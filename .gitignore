@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.env
+*.log
+backups/
+uploads/
+.DS_Store
+Thumbs.db
+
+# Build do frontend (gerado em backend/public pelo vite build)
+backend/public/
+# Config local (gerado pelo instalador)
+backend/config/config.json
+# Cache e artefatos do instalador
+installer/cache/
+installer/staging/
+installer/*.exe
