@@ -7,6 +7,7 @@ router.use(autenticar);
 
 // Registrar venda — todos (caixa, gerente, admin)
 router.post('/', ctrl.registrar);
+router.post('/auditoria-evento', ctrl.registrarAuditoriaEvento);
 
 // Listar e buscar detalhes — somente Gerente e Admin
 router.get('/', autorizar('ADMINISTRADOR', 'GERENTE'), ctrl.listar);

@@ -17,6 +17,8 @@ const schema = z.object({
   categoriaId: z.string().optional(),
   fornecedorId: z.string().optional(),
   unidade: z.string().default('UN'),
+  tipoVenda: z.enum(['UNIDADE', 'PESO']).default('UNIDADE'),
+  modoPesagem: z.enum(['MANUAL', 'CODIGO_BARRAS_BALANCA']).default('MANUAL'),
   precoCompra: z.coerce.number().min(0),
   precoVenda: z.coerce.number().min(0.01, 'Preço obrigatório'),
   estoqueAtual: z.coerce.number().min(0),
@@ -48,9 +50,11 @@ export default function ProdutosPage() {
     queryFn: () => fornecedoresService.listar({ limit: 200 }),
   });
 
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<Form>({
+  const { register, handleSubmit, reset, watch, formState: { errors } } = useForm<Form>({
     resolver: zodResolver(schema),
   });
+
+  const tipoVendaWatch = watch('tipoVenda');
 
   const salvar = useMutation({
     mutationFn: (data: Form) => {
@@ -96,7 +100,9 @@ export default function ProdutosPage() {
       descricao: prod.descricao || '',
       categoriaId: prod.categoriaId || '',
       fornecedorId: prod.fornecedorId || '',
-      unidade: prod.unidade,
+      unidade: prod.unidade || 'UN',
+      tipoVenda: prod.tipoVenda || 'UNIDADE',
+      modoPesagem: prod.modoPesagem || 'MANUAL',
       precoCompra: Number(prod.precoCompra),
       precoVenda: Number(prod.precoVenda),
       estoqueAtual: prod.estoqueAtual,
@@ -108,7 +114,7 @@ export default function ProdutosPage() {
 
   function abrirNovo() {
     setEditando(null);
-    reset({ unidade: 'UN', precoCompra: 0, precoVenda: 0, estoqueAtual: 0, estoqueMinimo: 0, ativo: true });
+    reset({ unidade: 'UN', tipoVenda: 'UNIDADE', modoPesagem: 'MANUAL', precoCompra: 0, precoVenda: 0, estoqueAtual: 0, estoqueMinimo: 0, ativo: true });
     setModalOpen(true);
   }
 
@@ -287,6 +293,40 @@ export default function ProdutosPage() {
                 <option key={u} value={u}>{u}</option>
               ))}
             </select>
+          </div>
+          <div className="col-span-2 p-sm bg-surface-container-low rounded-lg border border-outline-variant space-y-sm">
+            <p className="label font-bold text-on-surface">Tipo de Venda & Pesagem (PRD v1.2)</p>
+            <div className="flex gap-lg">
+              <div className="space-y-xs">
+                <label className="text-body-sm font-semibold text-on-surface">Tipo de Venda:</label>
+                <div className="flex items-center gap-md">
+                  <label className="flex items-center gap-xs text-body-sm cursor-pointer">
+                    <input {...register('tipoVenda')} type="radio" value="UNIDADE" className="accent-primary" />
+                    Unidade
+                  </label>
+                  <label className="flex items-center gap-xs text-body-sm cursor-pointer">
+                    <input {...register('tipoVenda')} type="radio" value="PESO" className="accent-primary" />
+                    Peso
+                  </label>
+                </div>
+              </div>
+
+              {tipoVendaWatch === 'PESO' && (
+                <div className="space-y-xs">
+                  <label className="text-body-sm font-semibold text-on-surface">Modo de Pesagem:</label>
+                  <div className="flex items-center gap-md">
+                    <label className="flex items-center gap-xs text-body-sm cursor-pointer">
+                      <input {...register('modoPesagem')} type="radio" value="MANUAL" className="accent-primary" />
+                      Manual
+                    </label>
+                    <label className="flex items-center gap-xs text-body-sm cursor-pointer text-on-surface-variant/60" title="Futura integração com balança">
+                      <input {...register('modoPesagem')} type="radio" value="CODIGO_BARRAS_BALANCA" className="accent-primary" />
+                      Código de Barras da Balança
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
           <div>
             <label className="label">Preço de Compra *</label>

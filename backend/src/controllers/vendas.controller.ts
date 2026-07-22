@@ -8,13 +8,27 @@ import { registrarAuditoria } from '../utils/auditoria';
 const itemSchema = z.object({
   produtoId: z.string().uuid(),
   quantidade: z.number().min(0.001),
+  peso: z.number().optional(),
+  valorKg: z.number().optional(),
   precoUnit: z.number().min(0),
   desconto: z.number().min(0).default(0),
 });
 
 const pagamentoSchema = z.object({
-  formaPagamento: z.enum(['DINHEIRO', 'PIX', 'CARTAO_CREDITO', 'CARTAO_DEBITO', 'VALE', 'FIADO']),
+  formaPagamento: z.enum([
+    'DINHEIRO',
+    'PIX',
+    'CARTAO_CREDITO',
+    'CARTAO_DEBITO',
+    'POS_DEBITO',
+    'POS_CREDITO',
+    'VALE',
+    'VALE_ALIMENTACAO',
+    'VALE_REFEICAO',
+    'FIADO',
+  ]),
   valor: z.number().min(0),
+  ordem: z.number().optional(),
 });
 
 const vendaSchema = z.object({
@@ -48,11 +62,17 @@ export async function registrar(req: AuthRequest, res: Response): Promise<void> 
   const total = subtotal - data.desconto;
 
   const totalPago = data.pagamentos.reduce((acc, p) => acc + p.valor, 0);
-  if (totalPago < total) throw new AppError('Valor pago insuficiente', 422);
+  if (totalPago < total) throw new AppError('Ainda existe saldo pendente.', 422);
 
-  const troco = data.pagamentos.some((p) => p.formaPagamento === 'DINHEIRO')
-    ? Math.max(0, totalPago - total)
-    : 0;
+  // Troco gerado estritamente para pagamentos em DINHEIRO
+  const totalDinheiro = data.pagamentos
+    .filter((p) => p.formaPagamento === 'DINHEIRO')
+    .reduce((acc, p) => acc + p.valor, 0);
+  const totalOutros = data.pagamentos
+    .filter((p) => p.formaPagamento !== 'DINHEIRO')
+    .reduce((acc, p) => acc + p.valor, 0);
+  const saldoPosOutros = total - totalOutros;
+  const troco = totalDinheiro > saldoPosOutros ? totalDinheiro - Math.max(0, saldoPosOutros) : 0;
 
   const formaPrincipal =
     data.pagamentos.length === 1 ? data.pagamentos[0].formaPagamento : 'MISTO';
@@ -76,15 +96,18 @@ export async function registrar(req: AuthRequest, res: Response): Promise<void> 
           create: data.itens.map((item) => ({
             produtoId: item.produtoId,
             quantidade: item.quantidade,
+            peso: item.peso,
+            valorKg: item.valorKg,
             precoUnit: item.precoUnit,
             desconto: item.desconto,
             subtotal: item.precoUnit * item.quantidade - item.desconto,
           })),
         },
         pagamentos: {
-          create: data.pagamentos.map((p) => ({
+          create: data.pagamentos.map((p, index) => ({
             formaPagamento: p.formaPagamento,
             valor: p.valor,
+            ordem: p.ordem || index + 1,
           })),
         },
       },
@@ -244,4 +267,21 @@ export async function buscarPorId(req: AuthRequest, res: Response): Promise<void
   });
   if (!venda) throw new AppError('Venda não encontrada', 404);
   res.json(venda);
+}
+
+export async function registrarAuditoriaEvento(req: AuthRequest, res: Response): Promise<void> {
+  const schema = z.object({
+    acao: z.string(),
+    detalhes: z.record(z.any()).optional(),
+  });
+  const { acao, detalhes } = schema.parse(req.body);
+
+  await registrarAuditoria({
+    usuarioId: req.usuario?.id,
+    acao,
+    tabela: 'vendas',
+    dadosDepois: detalhes,
+  });
+
+  res.status(201).json({ ok: true });
 }

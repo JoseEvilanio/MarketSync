@@ -75,29 +75,41 @@ model Fornecedor {
   @@map("fornecedores")
 }
 
+enum TipoVenda {
+  UNIDADE
+  PESO
+}
+
+enum ModoPesagem {
+  MANUAL
+  CODIGO_BARRAS_BALANCA
+}
+
 // ─────────────── PRODUTOS ───────────────
 
 model Produto {
-  id              String     @id @default(uuid())
-  codigoInterno   String?    @unique
-  codigoBarras    String?    @unique
+  id              String      @id @default(uuid())
+  codigoInterno   String?     @unique
+  codigoBarras    String?     @unique
   nome            String
   descricao       String?
   categoriaId     String?
   marcaId         String?
   fornecedorId    String?
-  unidade         String     @default("UN")
+  unidade         String      @default("UN")
+  tipoVenda       TipoVenda   @default(UNIDADE)
+  modoPesagem     ModoPesagem @default(MANUAL)
   peso            Float?
-  precoCompra     Decimal    @db.Decimal(10, 2) @default(0)
-  precoVenda      Decimal    @db.Decimal(10, 2)
+  precoCompra     Decimal     @db.Decimal(10, 2) @default(0)
+  precoVenda      Decimal     @db.Decimal(10, 2)
   margemLucro     Float?
-  estoqueAtual    Float      @default(0)
-  estoqueMinimo   Float      @default(0)
+  estoqueAtual    Float       @default(0)
+  estoqueMinimo   Float       @default(0)
   localizacao     String?
   imagem          String?
-  ativo           Boolean    @default(true)
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  ativo           Boolean     @default(true)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
   deletedAt       DateTime?
 
   categoria       Categoria?  @relation(fields: [categoriaId], references: [id])
@@ -215,7 +227,11 @@ enum FormaPagamento {
   PIX
   CARTAO_CREDITO
   CARTAO_DEBITO
+  POS_DEBITO
+  POS_CREDITO
   VALE
+  VALE_ALIMENTACAO
+  VALE_REFEICAO
   FIADO
   MISTO
 }
@@ -252,11 +268,12 @@ model PagamentoVenda {
   vendaId        String
   formaPagamento FormaPagamento
   valor          Decimal         @db.Decimal(10, 2)
+  ordem          Int             @default(1)
   createdAt      DateTime        @default(now())
 
   venda          Venda           @relation(fields: [vendaId], references: [id])
 
-  @@map("pagamentos_venda")
+  @@map("venda_pagamentos")
 }
 
 model ItemVenda {
@@ -264,6 +281,8 @@ model ItemVenda {
   vendaId     String
   produtoId   String
   quantidade  Float
+  peso        Float?
+  valorKg     Decimal?  @db.Decimal(10, 2)
   precoUnit   Decimal   @db.Decimal(10, 2)
   desconto    Decimal   @db.Decimal(10, 2) @default(0)
   subtotal    Decimal   @db.Decimal(10, 2)

@@ -28,6 +28,8 @@ const produtoSchema = z.object({
   marcaId: optionalUuid,
   fornecedorId: optionalUuid,
   unidade: z.string().default('UN'),
+  tipoVenda: z.enum(['UNIDADE', 'PESO']).default('UNIDADE'),
+  modoPesagem: z.enum(['MANUAL', 'CODIGO_BARRAS_BALANCA']).default('MANUAL'),
   peso: optionalNumber,
   precoCompra: z.coerce.number().min(0).default(0),
   precoVenda: z.coerce.number().min(0),

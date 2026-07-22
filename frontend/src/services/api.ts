@@ -95,6 +95,8 @@ export const vendasService = {
   registrar: (data: object) => api.post('/vendas', data).then((r) => r.data),
   cancelar: (id: string, motivo: string) =>
     api.post(`/vendas/${id}/cancelar`, { motivo }).then((r) => r.data),
+  auditoriaEvento: (acao: string, detalhes?: object) =>
+    api.post('/vendas/auditoria-evento', { acao, detalhes }).then((r) => r.data),
 };
 
 export const estoqueService = {

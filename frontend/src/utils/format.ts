@@ -59,9 +59,13 @@ export function formatPercent(value: number): string {
 export const formaPagamentoLabel: Record<string, string> = {
   DINHEIRO: 'Dinheiro',
   PIX: 'PIX',
-  CARTAO_CREDITO: 'Cartão Crédito',
-  CARTAO_DEBITO: 'Cartão Débito',
+  CARTAO_CREDITO: 'Crédito',
+  CARTAO_DEBITO: 'Débito',
+  POS_DEBITO: 'Débito (POS)',
+  POS_CREDITO: 'Crédito (POS)',
   VALE: 'Vale',
+  VALE_ALIMENTACAO: 'Vale Alimentação',
+  VALE_REFEICAO: 'Vale Refeição',
   FIADO: 'Fiado',
   MISTO: 'Misto',
 };
