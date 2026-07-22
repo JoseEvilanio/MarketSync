@@ -270,6 +270,13 @@ $outExe = "MercadoPro_Setup_v${Versao}.exe"
 if ($LASTEXITCODE -ne 0) { Write-Fail "Falha na compilacao NSIS. Verifique os logs acima." }
 Pop-Location
 
+# --- Restaurar devDependencies no backend local ---
+Write-Step "Restaurando dependencias de desenvolvimento no backend..."
+Push-Location $backendDir
+npm install --silent
+Pop-Location
+Write-OK "Dependencias de desenvolvimento restauradas"
+
 # --- Resumo ---
 
 $exePath   = Join-Path $installerDir $outExe

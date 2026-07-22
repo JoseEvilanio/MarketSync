@@ -10,8 +10,16 @@ interface JwtPayload {
   exp: number;
 }
 
-export interface AuthRequest extends Request {
+export interface AuthRequest<
+  P = any,
+  ResBody = any,
+  ReqBody = any,
+  ReqQuery = any
+> extends Request<P, ResBody, ReqBody, ReqQuery> {
   usuario?: { id: string; perfil: string };
+  params: P;
+  query: ReqQuery;
+  body: ReqBody;
 }
 
 export function autenticar(req: AuthRequest, _res: Response, next: NextFunction): void {
