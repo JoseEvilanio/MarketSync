@@ -86,18 +86,30 @@ export async function historico(req: AuthRequest, res: Response): Promise<void> 
   res.json({ data: movimentos, total, page: Number(page), limit: Number(limit) });
 }
 
-export async function produtosEstoqueBaixo(_req: AuthRequest, res: Response): Promise<void> {
-  const produtos = await prisma.produto.findMany({
-    where: {
-      deletedAt: null,
-      ativo: true,
-      estoqueAtual: { lte: prisma.produto.fields.estoqueMinimo },
-    },
-    include: { categoria: true, fornecedor: { select: { nome: true } } },
-    orderBy: { estoqueAtual: 'asc' },
-  });
+function sanitizeRaw<T = any>(data: any): T {
+  if (data === null || data === undefined) return data;
+  if (typeof data === 'bigint') return Number(data) as any;
+  if (Array.isArray(data)) return data.map(sanitizeRaw) as any;
+  if (typeof data === 'object') {
+    const res: any = {};
+    for (const key of Object.keys(data)) {
+      const val = data[key];
+      if (typeof val === 'bigint') {
+        res[key] = Number(val);
+      } else if (val && typeof val === 'object' && typeof val.toNumber === 'function') {
+        res[key] = val.toNumber();
+      } else if (val && typeof val === 'object') {
+        res[key] = sanitizeRaw(val);
+      } else {
+        res[key] = val;
+      }
+    }
+    return res;
+  }
+  return data;
+}
 
-  // Filtrar manualmente por query (Prisma não suporta comparação entre campos diretamente em todos os casos)
+export async function produtosEstoqueBaixo(_req: AuthRequest, res: Response): Promise<void> {
   const resultado = await prisma.$queryRaw<any[]>`
     SELECT p.id, p.nome, p."codigoBarras", p."estoqueAtual", p."estoqueMinimo",
            c.nome as "categoriaNome", f.nome as "fornecedorNome"
@@ -110,7 +122,7 @@ export async function produtosEstoqueBaixo(_req: AuthRequest, res: Response): Pr
     ORDER BY (p."estoqueAtual" - p."estoqueMinimo") ASC
   `;
 
-  res.json(resultado);
+  res.json(sanitizeRaw(resultado));
 }
 
 export async function inventario(req: AuthRequest, res: Response): Promise<void> {
