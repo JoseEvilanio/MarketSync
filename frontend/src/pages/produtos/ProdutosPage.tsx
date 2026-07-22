@@ -53,16 +53,29 @@ export default function ProdutosPage() {
   });
 
   const salvar = useMutation({
-    mutationFn: (data: Form) =>
-      editando
-        ? produtosService.atualizar(editando.id, data)
-        : produtosService.criar(data),
+    mutationFn: (data: Form) => {
+      const payload = {
+        ...data,
+        categoriaId: data.categoriaId || null,
+        fornecedorId: data.fornecedorId || null,
+        codigoBarras: data.codigoBarras || null,
+        codigoInterno: data.codigoInterno || null,
+        descricao: data.descricao || null,
+      };
+      return editando
+        ? produtosService.atualizar(editando.id, payload)
+        : produtosService.criar(payload);
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['produtos'] });
       toast.success(editando ? 'Produto atualizado' : 'Produto criado');
       setModalOpen(false);
       setEditando(null);
       reset();
+    },
+    onError: (err: any) => {
+      const msg = err.response?.data?.erro || err.response?.data?.detalhes?.join(', ') || 'Erro ao salvar produto';
+      toast.error(msg);
     },
   });
 
