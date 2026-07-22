@@ -2,126 +2,169 @@ import { Response } from 'express';
 import prisma from '../config/prisma';
 import { AuthRequest } from '../middlewares/auth.middleware';
 
-export async function dashboard(_req: AuthRequest, res: Response): Promise<void> {
-  const hoje = new Date();
-  hoje.setHours(0, 0, 0, 0);
-  const amanha = new Date(hoje);
-  amanha.setDate(amanha.getDate() + 1);
-
-  const inicioSemana = new Date(hoje);
-  inicioSemana.setDate(hoje.getDate() - hoje.getDay());
-
-  const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
-
-  const [
-    vendasHoje,
-    vendasSemana,
-    vendasMes,
-    caixaAberto,
-    produtosEstoqueBaixo,
-    maiVendidos,
-    semVenda,
-    totalProdutos,
-  ] = await Promise.all([
-    // Vendas hoje
-    prisma.venda.aggregate({
-      where: { status: 'CONCLUIDA', createdAt: { gte: hoje, lt: amanha } },
-      _sum: { total: true },
-      _count: { id: true },
-    }),
-    // Vendas semana
-    prisma.venda.aggregate({
-      where: { status: 'CONCLUIDA', createdAt: { gte: inicioSemana } },
-      _sum: { total: true },
-    }),
-    // Vendas mês
-    prisma.venda.aggregate({
-      where: { status: 'CONCLUIDA', createdAt: { gte: inicioMes } },
-      _sum: { total: true },
-    }),
-    // Caixa aberto
-    prisma.caixa.findFirst({
-      where: { status: 'ABERTO' },
-      include: { usuario: { select: { nome: true } } },
-    }),
-    // Produtos com estoque baixo
-    prisma.$queryRaw<{ count: bigint }[]>`
-      SELECT COUNT(*) as count FROM produtos
-      WHERE "deletedAt" IS NULL AND ativo = true
-        AND "estoqueAtual" <= "estoqueMinimo"
-    `,
-    // Mais vendidos (últimos 30 dias)
-    prisma.$queryRaw<any[]>`
-      SELECT p.id, p.nome, SUM(iv.quantidade) as total_qty, SUM(iv.subtotal) as total_valor
-      FROM itens_venda iv
-      JOIN produtos p ON p.id = iv."produtoId"
-      JOIN vendas v ON v.id = iv."vendaId"
-      WHERE v.status = 'CONCLUIDA'
-        AND v."createdAt" >= NOW() - INTERVAL '30 days'
-      GROUP BY p.id, p.nome
-      ORDER BY total_qty DESC
-      LIMIT 10
-    `,
-    // Sem venda (últimos 30 dias)
-    prisma.$queryRaw<{ count: bigint }[]>`
-      SELECT COUNT(*) as count FROM produtos p
-      WHERE p."deletedAt" IS NULL AND p.ativo = true
-        AND p.id NOT IN (
-          SELECT DISTINCT iv."produtoId"
-          FROM itens_venda iv
-          JOIN vendas v ON v.id = iv."vendaId"
-          WHERE v.status = 'CONCLUIDA'
-            AND v."createdAt" >= NOW() - INTERVAL '30 days'
-        )
-    `,
-    prisma.produto.count({ where: { deletedAt: null, ativo: true } }),
-  ]);
-
-  // Calcular lucro estimado do dia
-  const itensHoje = await prisma.itemVenda.findMany({
-    where: {
-      venda: { status: 'CONCLUIDA', createdAt: { gte: hoje, lt: amanha } },
-    },
-    include: { produto: { select: { precoCompra: true } } },
-  });
-
-  const lucroHoje = itensHoje.reduce((acc, item) => {
-    const custo = Number(item.produto.precoCompra) * item.quantidade;
-    return acc + Number(item.subtotal) - custo;
-  }, 0);
-
-  const totalVendasHoje = Number(vendasHoje._sum.total) || 0;
-  const ticketMedio =
-    vendasHoje._count.id > 0 ? totalVendasHoje / vendasHoje._count.id : 0;
-
-  // Calcular valor em caixa
-  let valorEmCaixa = 0;
-  if (caixaAberto) {
-    const movs = await prisma.movimentoCaixa.findMany({
-      where: { caixaId: caixaAberto.id },
-    });
-    valorEmCaixa = movs.reduce((acc, m) => {
-      if (['ABERTURA', 'SUPRIMENTO', 'VENDA'].includes(m.tipo)) return acc + Number(m.valor);
-      if (['SANGRIA', 'DEVOLUCAO'].includes(m.tipo)) return acc - Number(m.valor);
-      return acc;
-    }, 0);
+function sanitizeRaw<T = any>(data: any): T {
+  if (data === null || data === undefined) return data;
+  if (typeof data === 'bigint') return Number(data) as any;
+  if (Array.isArray(data)) return data.map(sanitizeRaw) as any;
+  if (typeof data === 'object') {
+    const res: any = {};
+    for (const key of Object.keys(data)) {
+      const val = data[key];
+      if (typeof val === 'bigint') {
+        res[key] = Number(val);
+      } else if (val && typeof val === 'object' && typeof val.toNumber === 'function') {
+        res[key] = val.toNumber();
+      } else if (val && typeof val === 'object') {
+        res[key] = sanitizeRaw(val);
+      } else {
+        res[key] = val;
+      }
+    }
+    return res;
   }
+  return data;
+}
 
-  res.json({
-    vendasHoje: totalVendasHoje,
-    vendasSemana: Number(vendasSemana._sum.total) || 0,
-    vendasMes: Number(vendasMes._sum.total) || 0,
-    ticketMedio,
-    lucroHoje,
-    caixaAberto: caixaAberto
-      ? { ...caixaAberto, valorEmCaixa }
-      : null,
-    produtosEstoqueBaixo: Number((produtosEstoqueBaixo[0] as any)?.count) || 0,
-    maiVendidos,
-    semVenda: Number((semVenda[0] as any)?.count) || 0,
-    totalProdutos,
-    quantidadeVendasHoje: vendasHoje._count.id,
-  });
+export async function dashboard(_req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    const amanha = new Date(hoje);
+    amanha.setDate(amanha.getDate() + 1);
+
+    const inicioSemana = new Date(hoje);
+    inicioSemana.setDate(hoje.getDate() - hoje.getDay());
+
+    const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+
+    const [
+      vendasHoje,
+      vendasSemana,
+      vendasMes,
+      caixaAberto,
+      produtosEstoqueBaixo,
+      maiVendidos,
+      semVenda,
+      totalProdutos,
+    ] = await Promise.all([
+      // Vendas hoje
+      prisma.venda.aggregate({
+        where: { status: 'CONCLUIDA', createdAt: { gte: hoje, lt: amanha } },
+        _sum: { total: true },
+        _count: { id: true },
+      }),
+      // Vendas semana
+      prisma.venda.aggregate({
+        where: { status: 'CONCLUIDA', createdAt: { gte: inicioSemana } },
+        _sum: { total: true },
+      }),
+      // Vendas mês
+      prisma.venda.aggregate({
+        where: { status: 'CONCLUIDA', createdAt: { gte: inicioMes } },
+        _sum: { total: true },
+      }),
+      // Caixa aberto
+      prisma.caixa.findFirst({
+        where: { status: 'ABERTO' },
+        include: { usuario: { select: { nome: true } } },
+      }),
+      // Produtos com estoque baixo
+      prisma.$queryRaw<{ count: bigint }[]>`
+        SELECT COUNT(*) as count FROM produtos
+        WHERE "deletedAt" IS NULL AND ativo = true
+          AND "estoqueAtual" <= "estoqueMinimo"
+      `,
+      // Mais vendidos (últimos 30 dias)
+      prisma.$queryRaw<any[]>`
+        SELECT p.id, p.nome, SUM(iv.quantidade) as total_qty, SUM(iv.subtotal) as total_valor
+        FROM itens_venda iv
+        JOIN produtos p ON p.id = iv."produtoId"
+        JOIN vendas v ON v.id = iv."vendaId"
+        WHERE v.status = 'CONCLUIDA'
+          AND v."createdAt" >= NOW() - INTERVAL '30 days'
+        GROUP BY p.id, p.nome
+        ORDER BY total_qty DESC
+        LIMIT 10
+      `,
+      // Sem venda (últimos 30 dias)
+      prisma.$queryRaw<{ count: bigint }[]>`
+        SELECT COUNT(*) as count FROM produtos p
+        WHERE p."deletedAt" IS NULL AND p.ativo = true
+          AND p.id NOT IN (
+            SELECT DISTINCT iv."produtoId"
+            FROM itens_venda iv
+            JOIN vendas v ON v.id = iv."vendaId"
+            WHERE v.status = 'CONCLUIDA'
+              AND v."createdAt" >= NOW() - INTERVAL '30 days'
+          )
+      `,
+      prisma.produto.count({ where: { deletedAt: null, ativo: true } }),
+    ]);
+
+    // Calcular lucro estimado do dia
+    const itensHoje = await prisma.itemVenda.findMany({
+      where: {
+        venda: { status: 'CONCLUIDA', createdAt: { gte: hoje, lt: amanha } },
+      },
+      include: { produto: { select: { precoCompra: true } } },
+    });
+
+    const lucroHoje = itensHoje.reduce((acc, item) => {
+      const precoCompra = item.produto?.precoCompra ? Number(item.produto.precoCompra) : 0;
+      const custo = precoCompra * item.quantidade;
+      return acc + Number(item.subtotal) - custo;
+    }, 0);
+
+    const totalVendasHoje = Number(vendasHoje._sum.total) || 0;
+    const ticketMedio =
+      vendasHoje._count.id > 0 ? totalVendasHoje / vendasHoje._count.id : 0;
+
+    // Calcular valor em caixa
+    let valorEmCaixa = 0;
+    if (caixaAberto) {
+      const movs = await prisma.movimentoCaixa.findMany({
+        where: { caixaId: caixaAberto.id },
+      });
+      valorEmCaixa = movs.reduce((acc, m) => {
+        if (['ABERTURA', 'SUPRIMENTO', 'VENDA'].includes(m.tipo)) return acc + Number(m.valor);
+        if (['SANGRIA', 'DEVOLUCAO'].includes(m.tipo)) return acc - Number(m.valor);
+        return acc;
+      }, 0);
+    }
+
+    const countEstoqueBaixo = produtosEstoqueBaixo?.[0]?.count !== undefined
+      ? Number(produtosEstoqueBaixo[0].count)
+      : 0;
+
+    const countSemVenda = semVenda?.[0]?.count !== undefined
+      ? Number(semVenda[0].count)
+      : 0;
+
+    const maiVendidosFormatado = (maiVendidos || []).map((item: any) => ({
+      id: item.id,
+      nome: item.nome,
+      total_qty: Number(item.total_qty) || 0,
+      total_valor: Number(item.total_valor) || 0,
+    }));
+
+    res.json({
+      vendasHoje: totalVendasHoje,
+      vendasSemana: Number(vendasSemana._sum.total) || 0,
+      vendasMes: Number(vendasMes._sum.total) || 0,
+      ticketMedio,
+      lucroHoje,
+      caixaAberto: caixaAberto
+        ? { ...caixaAberto, valorEmCaixa }
+        : null,
+      produtosEstoqueBaixo: countEstoqueBaixo,
+      maiVendidos: maiVendidosFormatado,
+      semVenda: countSemVenda,
+      totalProdutos,
+      quantidadeVendasHoje: vendasHoje._count.id,
+    });
+  } catch (err: any) {
+    res.status(500).json({ erro: 'Erro ao carregar dados do dashboard', detalhes: err?.message });
+  }
 }
 
 export async function vendasPorPeriodo(req: AuthRequest, res: Response): Promise<void> {
@@ -151,7 +194,7 @@ export async function vendasPorPeriodo(req: AuthRequest, res: Response): Promise
     ORDER BY periodo ASC
   `;
 
-  res.json(resultado);
+  res.json(sanitizeRaw(resultado));
 }
 
 export async function vendasPorProduto(req: AuthRequest, res: Response): Promise<void> {
@@ -179,7 +222,7 @@ export async function vendasPorProduto(req: AuthRequest, res: Response): Promise
     LIMIT ${parseInt(limit)}
   `;
 
-  res.json(resultado);
+  res.json(sanitizeRaw(resultado));
 }
 
 export async function vendasPorOperador(req: AuthRequest, res: Response): Promise<void> {
@@ -202,7 +245,7 @@ export async function vendasPorOperador(req: AuthRequest, res: Response): Promis
     ORDER BY total DESC
   `;
 
-  res.json(resultado);
+  res.json(sanitizeRaw(resultado));
 }
 
 export async function estoqueCritico(_req: AuthRequest, res: Response): Promise<void> {
@@ -220,7 +263,7 @@ export async function estoqueCritico(_req: AuthRequest, res: Response): Promise<
     ORDER BY (p."estoqueAtual" - p."estoqueMinimo") ASC
   `;
 
-  res.json(resultado);
+  res.json(sanitizeRaw(resultado));
 }
 
 export async function caixaRelatorio(req: AuthRequest, res: Response): Promise<void> {
