@@ -406,7 +406,7 @@ export default function PDVPage() {
             {store.itens.length === 0 && (
               <div className="flex flex-col items-center justify-center h-full gap-md text-on-primary-container/60">
                 <span className="material-symbols-outlined text-[64px]">barcode_scanner</span>
-                <p className="text-body-lg">Escaneie ou digite um código para começar (Ex: 3*789...)</p>
+                <p className="text-body-lg">Escaneie ou digite um código para começar</p>
               </div>
             )}
             {store.itens.map((item, idx) => (
