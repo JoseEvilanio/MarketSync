@@ -58,7 +58,7 @@ export const produtosService = {
 };
 
 export const categoriasService = {
-  listar: () => api.get('/categorias').then((r) => r.data),
+  listar: (params?: object) => api.get('/categorias', { params }).then((r) => r.data),
   criar: (data: object) => api.post('/categorias', data).then((r) => r.data),
   atualizar: (id: string, data: object) => api.put(`/categorias/${id}`, data).then((r) => r.data),
   remover: (id: string) => api.delete(`/categorias/${id}`),

@@ -5,26 +5,10 @@ import toast from 'react-hot-toast';
 import { usePDVStore } from '@/stores/pdv.store';
 import { useAuthStore } from '@/stores/auth.store';
 import { produtosService, vendasService, caixaService, clientesService } from '@/services/api';
-import { formatCurrency, formaPagamentoLabel } from '@/utils/format';
+import { formatCurrency } from '@/utils/format';
 import Modal from '@/components/ui/Modal';
 import ModalCaixa from '@/components/ui/ModalCaixa';
-
-type FormaPag =
-  | 'DINHEIRO'
-  | 'PIX'
-  | 'POS_DEBITO'
-  | 'POS_CREDITO'
-  | 'VALE_ALIMENTACAO'
-  | 'VALE_REFEICAO';
-
-const FORMAS: { key: FormaPag; tecla: string; label: string; icon: string }[] = [
-  { key: 'DINHEIRO',        tecla: '2', label: '2 - Dinheiro',         icon: 'payments' },
-  { key: 'PIX',             tecla: '3', label: '3 - PIX',              icon: 'pix' },
-  { key: 'POS_DEBITO',      tecla: '4', label: '4 - Débito',           icon: 'credit_card' },
-  { key: 'POS_CREDITO',     tecla: '5', label: '5 - Crédito',          icon: 'credit_score' },
-  { key: 'VALE_ALIMENTACAO',tecla: '6', label: '6 - Vale Alimentação', icon: 'local_dining' },
-  { key: 'VALE_REFEICAO',   tecla: '7', label: '7 - Vale Refeição',    icon: 'restaurant' },
-];
+import { ModalFinalizacaoPDV } from '@/components/pdv/ModalFinalizacaoPDV';
 
 export default function PDVPage() {
   const navigate = useNavigate();
@@ -32,7 +16,6 @@ export default function PDVPage() {
   const store = usePDVStore();
 
   const barcodeRef = useRef<HTMLInputElement>(null);
-  const valorPagRef = useRef<HTMLInputElement>(null);
   const pesoInputRef = useRef<HTMLInputElement>(null);
 
   const [codigoInput, setCodigoInput] = useState('');
@@ -47,8 +30,6 @@ export default function PDVPage() {
 
   const [descInput, setDescInput] = useState('');
   const [descTipo, setDescTipo] = useState<'%' | 'R$'>('%');
-  const [valorPagInput, setValorPagInput] = useState('');
-  const [formaSel, setFormaSel] = useState<FormaPag>('DINHEIRO');
   const [itemSel, setItemSel] = useState<string | null>(null);
   const [searchCli, setSearchCli] = useState('');
   const [debouncedCli, setDebouncedCli] = useState('');
@@ -65,13 +46,6 @@ export default function PDVPage() {
       setTimeout(() => pesoInputRef.current?.focus(), 100);
     }
   }, [produtoPesoPending]);
-
-  // Foco no input de pagamento quando o modal abre
-  useEffect(() => {
-    if (modalPag) {
-      setTimeout(() => valorPagRef.current?.focus(), 100);
-    }
-  }, [modalPag]);
 
   // Busca de clientes no modal
   const { data: clientesData } = useQuery({
@@ -238,16 +212,6 @@ export default function PDVPage() {
       }
     }
 
-    // Modal Pagamento ativo: teclas numeradas 2 a 7 selecionam a forma de pagamento (PRD v1.2 Seção 5)
-    if (modalPag) {
-      if (['2', '3', '4', '5', '6', '7'].includes(e.key)) {
-        const target = FORMAS.find((f) => f.tecla === e.key);
-        if (target) {
-          setFormaSel(target.key);
-        }
-      }
-    }
-
     switch (e.key) {
       case 'F2':
         e.preventDefault();
@@ -282,14 +246,8 @@ export default function PDVPage() {
       case 'Escape':
         e.preventDefault();
         if (modalPag) {
-          // ESC na tela de finalização apenas fecha o modal e mantem a venda aberta! (PRD v1.2 Seção 14)
-          setModalPag(false);
-          vendasService.auditoriaEvento('FECHAMENTO_TELA_FINALIZACAO_ESC', {
-            total: store.total(),
-            totalPago: store.totalPago(),
-            itensCount: store.itens.length,
-          });
-          barcodeRef.current?.focus();
+          // ESC tratado pelo ModalFinalizacaoPDV (PRD v2.0 Seção 13 e 14)
+          return;
         } else if (produtoPesoPending) {
           setProdutoPesoPending(null);
           barcodeRef.current?.focus();
@@ -327,32 +285,6 @@ export default function PDVPage() {
     barcodeRef.current?.focus();
   }
 
-  // Registrar pagamento via ENTER (PRD v1.2 - Seções 6 e 7)
-  function handleAdicionarPagamentoEnter(e: React.FormEvent) {
-    e.preventDefault();
-    const restante = store.total() - store.totalPago();
-    if (restante <= 0) {
-      toast.error('Venda já está quitada.');
-      return;
-    }
-    const val = parseFloat(valorPagInput.replace(',', '.')) || Math.max(0, restante);
-    if (isNaN(val) || val <= 0) return;
-
-    store.adicionarPagamento({ formaPagamento: formaSel, valor: val });
-    vendasService.auditoriaEvento('INCLUSAO_PAGAMENTO', { formaPagamento: formaSel, valor: val });
-    setValorPagInput('');
-    setTimeout(() => valorPagRef.current?.focus(), 50);
-  }
-
-  function removerPagamentoIdx(idx: number) {
-    const p = store.pagamentos[idx];
-    store.removerPagamento(idx);
-    vendasService.auditoriaEvento('EXCLUSAO_PAGAMENTO', { formaPagamento: p?.formaPagamento, valor: p?.valor });
-  }
-
-  const troco = store.troco();
-  const restante = store.total() - store.totalPago();
-
   return (
     <div className="h-screen flex flex-col bg-background overflow-hidden">
       {/* Header */}
@@ -361,7 +293,7 @@ export default function PDVPage() {
           <button onClick={() => navigate('/dashboard')} className="p-2 text-on-surface-variant hover:bg-primary-fixed-dim rounded transition-colors">
             <span className="material-symbols-outlined">arrow_back</span>
           </button>
-          <h1 className="text-headline-md font-black text-on-surface">PDV — Frente de Caixa (v1.2)</h1>
+          <h1 className="text-headline-md font-black text-on-surface">PDV — Frente de Caixa (v2.0)</h1>
           {caixa && (
             <span className="badge badge-success text-[11px]">
               <span className="material-symbols-outlined text-[14px]">lock_open</span>
@@ -653,130 +585,20 @@ export default function PDVPage() {
         )}
       </Modal>
 
-      {/* ── Modal Pagamento (PRD v1.2 - Seções 5 a 14) ── */}
-      <Modal open={modalPag} onClose={() => { setModalPag(false); barcodeRef.current?.focus(); }} title="Finalizar Venda (Teclas 2 a 7 escolhem pagamento)" size="lg">
-        <div className="flex gap-lg">
-          {/* Formas de pagamento */}
-          <div className="flex-1">
-            <p className="label mb-sm font-bold">Forma de Pagamento (Pressione 2 a 7 ou clique)</p>
-            <div className="grid grid-cols-2 gap-sm mb-md">
-              {FORMAS.map((f) => (
-                <button
-                  key={f.key}
-                  type="button"
-                  onClick={() => setFormaSel(f.key)}
-                  className={`flex items-center gap-sm p-sm rounded-lg border-2 transition-colors text-body-sm font-bold ${
-                    formaSel === f.key
-                      ? 'border-primary bg-primary text-on-primary shadow-sm'
-                      : 'border-outline-variant hover:border-primary hover:bg-surface-container-low text-on-surface'
-                  }`}
-                >
-                  <span className="material-symbols-outlined text-[20px]">{f.icon}</span>
-                  {f.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Inserção por Enter - sem botão Adicionar (PRD v1.2 Seção 6) */}
-            <form onSubmit={handleAdicionarPagamentoEnter} className="space-y-xs">
-              <label className="label font-bold">Valor do Pagamento (R$) — Pressione ENTER para confirmar</label>
-              <div className="relative">
-                <input
-                  ref={valorPagRef}
-                  type="text"
-                  value={valorPagInput}
-                  onChange={(e) => setValorPagInput(e.target.value)}
-                  placeholder={`Saldo restante: ${formatCurrency(Math.max(0, restante))}`}
-                  className="input-lg text-center text-2xl font-black text-primary w-full pr-16"
-                  autoFocus
-                />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-label-md font-mono text-on-surface-variant/70 border border-outline-variant px-2 py-1 rounded bg-surface-container">
-                  ENTER
-                </span>
-              </div>
-              <p className="text-xs text-on-surface-variant text-center">
-                * Pressione <b>ENTER</b> no valor para adicionar o pagamento.
-              </p>
-            </form>
-
-            {/* Pagamentos adicionados */}
-            {store.pagamentos.length > 0 && (
-              <div className="mt-md space-y-xs max-h-40 overflow-y-auto">
-                <p className="label font-bold">Pagamentos Registrados ({store.pagamentos.length})</p>
-                {store.pagamentos.map((p, i) => (
-                  <div key={i} className="flex items-center justify-between bg-surface-container-low rounded-lg px-md py-sm border border-outline-variant">
-                    <div className="flex items-center gap-sm">
-                      <span className="material-symbols-outlined text-[18px] text-on-surface-variant">
-                        {FORMAS.find((f) => f.key === p.formaPagamento)?.icon || 'payments'}
-                      </span>
-                      <span className="text-body-sm font-bold">{formaPagamentoLabel[p.formaPagamento] || p.formaPagamento}</span>
-                    </div>
-                    <div className="flex items-center gap-sm">
-                      <span className="text-data-mono font-black text-headline-sm">{formatCurrency(p.valor)}</span>
-                      <button onClick={() => removerPagamentoIdx(i)} className="text-error hover:bg-error-container p-1 rounded" title="Remover pagamento">
-                        <span className="material-symbols-outlined text-[18px]">remove_circle</span>
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Resumo e Conclusão */}
-          <div className="w-64 flex flex-col gap-md">
-            <div className="card p-md flex flex-col gap-sm bg-surface-container-low">
-              <div className="flex justify-between text-body-md text-on-surface-variant">
-                <span>Total da Venda</span>
-                <span className="text-data-mono font-bold text-on-surface">{formatCurrency(store.total())}</span>
-              </div>
-              <div className="flex justify-between text-body-md text-on-surface-variant">
-                <span>Total Pago</span>
-                <span className="text-data-mono font-bold text-success">{formatCurrency(store.totalPago())}</span>
-              </div>
-              {restante > 0 && (
-                <div className="flex justify-between text-body-md text-on-surface-variant">
-                  <span>Saldo Restante</span>
-                  <span className="text-data-mono font-bold text-error">{formatCurrency(restante)}</span>
-                </div>
-              )}
-              {troco > 0 && (
-                <>
-                  <div className="h-px bg-outline-variant" />
-                  <div className="flex justify-between text-body-lg font-bold">
-                    <span>Troco (Dinheiro)</span>
-                    <span className="text-data-mono text-success font-black">{formatCurrency(troco)}</span>
-                  </div>
-                </>
-              )}
-            </div>
-
-            <button
-              onClick={() => finalizarVenda.mutate()}
-              disabled={restante > 0 || finalizarVenda.isPending || store.itens.length === 0}
-              className="mt-auto w-full bg-success text-white font-bold text-headline-md rounded-xl h-16 flex items-center justify-center gap-sm hover:brightness-90 transition-all active:scale-95 disabled:opacity-40 shadow-sm"
-            >
-              {finalizarVenda.isPending ? (
-                <><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Finalizando...</>
-              ) : (
-                <><span className="material-symbols-outlined icon-filled">check_circle</span> CONCLUIR VENDA</>
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setModalPag(false);
-                vendasService.auditoriaEvento('FECHAMENTO_TELA_FINALIZACAO_ESC');
-                barcodeRef.current?.focus();
-              }}
-              className="btn-outline w-full text-body-sm"
-            >
-              Voltar à Venda (ESC)
-            </button>
-          </div>
-        </div>
-      </Modal>
+      {/* ── Modal Finalização (PRD v2.0) ── */}
+      <ModalFinalizacaoPDV
+        open={modalPag}
+        onClose={() => {
+          setModalPag(false);
+          barcodeRef.current?.focus();
+        }}
+        totalVenda={store.total()}
+        pagamentos={store.pagamentos}
+        onAdicionarPagamento={(p) => store.adicionarPagamento(p)}
+        onRemoverPagamento={(idx) => store.removerPagamento(idx)}
+        onConcluirVenda={() => finalizarVenda.mutate()}
+        isPendingFinalizar={finalizarVenda.isPending}
+      />
 
       {/* ── Modal Desconto ── */}
       <Modal open={modalDesc} onClose={() => setModalDesc(false)} title="Aplicar Desconto (F4)" size="sm">

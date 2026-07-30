@@ -1,4 +1,8 @@
 import { create } from 'zustand';
+import { PagamentoItem, calcularResumoPagamentos } from '@/utils/paymentCalculator';
+
+export type Pagamento = PagamentoItem;
+export type { FormaPag } from '@/utils/paymentCalculator';
 
 export interface ItemCarrinho {
   produtoId: string;
@@ -11,22 +15,6 @@ export interface ItemCarrinho {
   precoUnit: number;
   desconto: number;
   subtotal: number;
-}
-
-export interface Pagamento {
-  formaPagamento:
-    | 'DINHEIRO'
-    | 'PIX'
-    | 'POS_DEBITO'
-    | 'POS_CREDITO'
-    | 'VALE_ALIMENTACAO'
-    | 'VALE_REFEICAO'
-    | 'CARTAO_CREDITO'
-    | 'CARTAO_DEBITO'
-    | 'VALE'
-    | 'FIADO';
-  valor: number;
-  ordem?: number;
 }
 
 interface PDVState {
@@ -47,7 +35,6 @@ interface PDVState {
   removerPagamento: (idx: number) => void;
   limparCarrinho: () => void;
 
-  // Computed
   subtotal: () => number;
   total: () => number;
   totalPago: () => number;
@@ -101,17 +88,6 @@ export const usePDVStore = create<PDVState>((set, get) => ({
 
   subtotal: () => get().itens.reduce((acc, i) => acc + i.subtotal, 0),
   total: () => get().subtotal() - get().desconto,
-  totalPago: () => get().pagamentos.reduce((acc, p) => acc + p.valor, 0),
-  troco: () => {
-    const total = get().total();
-    const pagamentos = get().pagamentos;
-    const totalDinheiro = pagamentos
-      .filter((p) => p.formaPagamento === 'DINHEIRO')
-      .reduce((acc, p) => acc + p.valor, 0);
-    const totalOutros = pagamentos
-      .filter((p) => p.formaPagamento !== 'DINHEIRO')
-      .reduce((acc, p) => acc + p.valor, 0);
-    const saldoPosOutros = total - totalOutros;
-    return totalDinheiro > saldoPosOutros ? totalDinheiro - Math.max(0, saldoPosOutros) : 0;
-  },
+  totalPago: () => calcularResumoPagamentos(get().total(), get().pagamentos).totalPago,
+  troco: () => calcularResumoPagamentos(get().total(), get().pagamentos).troco,
 }));

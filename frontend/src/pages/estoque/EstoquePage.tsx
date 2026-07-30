@@ -6,6 +6,7 @@ import { estoqueService, produtosService } from '@/services/api';
 import { formatDateTime } from '@/utils/format';
 import Modal from '@/components/ui/Modal';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import { EntradaMercadoriasModal } from '@/components/compras/EntradaMercadoriasModal';
 
 const TIPOS_ENTRADA = ['ENTRADA_COMPRA', 'ENTRADA_AJUSTE', 'ENTRADA_DEVOLUCAO'];
 const TIPOS_SAIDA = ['SAIDA_PERDA', 'SAIDA_CONSUMO', 'SAIDA_AJUSTE'];
@@ -20,6 +21,7 @@ export default function EstoquePage() {
   const qc = useQueryClient();
   const [tab, setTab] = useState<'critico' | 'historico' | 'inventario'>('critico');
   const [modalAjuste, setModalAjuste] = useState(false);
+  const [modalEntrada, setModalEntrada] = useState(false);
   const [searchHist, setSearchHist] = useState('');
 
   const { data: critico, isLoading: loadCrit } = useQuery({
@@ -37,7 +39,6 @@ export default function EstoquePage() {
   const { data: inventario, isLoading: loadInv } = useQuery({
     queryKey: ['inventario'],
     queryFn: () => estoqueService.inventario({}),
-    enabled: tab === 'inventario',
   });
 
   const { register, handleSubmit, reset } = useForm<any>();
@@ -53,6 +54,10 @@ export default function EstoquePage() {
       setModalAjuste(false);
       reset();
     },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.message || 'Erro ao realizar ajuste de estoque';
+      toast.error(msg);
+    },
   });
 
   const movHistorico = historico?.data || [];
@@ -66,10 +71,16 @@ export default function EstoquePage() {
         <div>
           <h3 className="text-headline-lg text-on-surface">Controle de Estoque</h3>
         </div>
-        <button onClick={() => setModalAjuste(true)} className="btn-success">
-          <span className="material-symbols-outlined text-[18px]">add_box</span>
-          Ajuste Manual
-        </button>
+        <div className="flex gap-sm">
+          <button onClick={() => setModalEntrada(true)} className="btn-primary flex items-center gap-1.5 font-bold">
+            <span className="material-symbols-outlined text-[20px]">inventory_2</span>
+            Dar Entrada de Nota
+          </button>
+          <button onClick={() => setModalAjuste(true)} className="btn-success flex items-center gap-1.5">
+            <span className="material-symbols-outlined text-[18px]">add_box</span>
+            Ajuste Manual
+          </button>
+        </div>
       </div>
 
       {/* Métricas rápidas */}
@@ -272,8 +283,15 @@ export default function EstoquePage() {
       <Modal open={modalAjuste} onClose={() => setModalAjuste(false)} title="Ajuste de Estoque">
         <form onSubmit={handleSubmit((d) => ajustar.mutate(d))} className="space-y-4">
           <div>
-            <label className="label">Produto (ID)</label>
-            <input {...register('produtoId', { required: true })} className="input" placeholder="ID do produto" />
+            <label className="label">Produto</label>
+            <select {...register('produtoId', { required: 'Selecione um produto' })} className="input">
+              <option value="">Selecione o produto...</option>
+              {(inventario || []).map((p: any) => (
+                <option key={p.id} value={p.id}>
+                  {p.nome} {p.codigoBarras ? `(${p.codigoBarras})` : ''} — Est. Atual: {p.estoqueAtual} {p.unidade}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="label">Tipo de Movimento</label>
@@ -302,6 +320,9 @@ export default function EstoquePage() {
           </div>
         </form>
       </Modal>
+
+      {/* Modal Entrada de Mercadorias (PRD v1.0) */}
+      <EntradaMercadoriasModal open={modalEntrada} onClose={() => setModalEntrada(false)} />
     </div>
   );
 }

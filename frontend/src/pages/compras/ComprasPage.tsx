@@ -6,12 +6,15 @@ import { formatCurrency, formatDateTime } from '@/utils/format';
 import Modal from '@/components/ui/Modal';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 
+import { EntradaMercadoriasModal } from '@/components/compras/EntradaMercadoriasModal';
+
 interface ItemForm { produtoId: string; produtoNome: string; quantidade: number; precoUnit: number; }
 
 export default function ComprasPage() {
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const [modalNova, setModalNova] = useState(false);
+  const [modalEntrada, setModalEntrada] = useState(false);
   const [modalDetalhe, setModalDetalhe] = useState<any>(null);
 
   // Form nova compra
@@ -106,10 +109,16 @@ export default function ComprasPage() {
           <h3 className="text-headline-lg text-on-surface">Compras</h3>
           <p className="text-body-md text-on-surface-variant mt-xs">{total} compra(s)</p>
         </div>
-        <button onClick={() => setModalNova(true)} className="btn-success">
-          <span className="material-symbols-outlined text-[18px]">add_shopping_cart</span>
-          Nova Compra
-        </button>
+        <div className="flex gap-sm">
+          <button onClick={() => setModalEntrada(true)} className="btn-primary flex items-center gap-1.5 font-bold">
+            <span className="material-symbols-outlined text-[20px]">inventory_2</span>
+            Entrada de Nota / Formação de Preço
+          </button>
+          <button onClick={() => setModalNova(true)} className="btn-success flex items-center gap-1.5">
+            <span className="material-symbols-outlined text-[18px]">add_shopping_cart</span>
+            Nova Compra Rápida
+          </button>
+        </div>
       </div>
 
       <div className="card overflow-hidden">
@@ -315,6 +324,8 @@ export default function ComprasPage() {
           </div>
         </Modal>
       )}
+      {/* Modal Entrada de Mercadorias (PRD v1.0) */}
+      <EntradaMercadoriasModal open={modalEntrada} onClose={() => setModalEntrada(false)} />
     </div>
   );
 }
