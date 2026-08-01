@@ -162,6 +162,23 @@ if ($checkDb.Trim() -eq "0" -or $checkDb.Trim() -eq "") {
 }
 $env:PGPASSWORD = ""
 
+# --- Conceder permissoes no schema public ao usuario 'mercado' ---
+Write-Log "Concedendo permissoes no schema public ao usuario 'mercado'..."
+$env:PGPASSWORD = $senhaPg
+$grantSqls = @(
+    "GRANT USAGE ON SCHEMA public TO mercado;"
+    "GRANT CREATE ON SCHEMA public TO mercado;"
+    "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO mercado;"
+    "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO mercado;"
+    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO mercado;"
+    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO mercado;"
+)
+foreach ($sql in $grantSqls) {
+    $out = & $psql -U postgres -d mercadopro_db -c $sql 2>&1
+    Write-Log "GRANT: $sql -> $($out -join ' ')"
+}
+$env:PGPASSWORD = ""
+
 # --- Salvar resultados no registro ---
 # Tenta HKLM (instalador roda como admin), fallback para HKCU
 $regPath = "HKLM:\Software\MercadoPro\Setup"

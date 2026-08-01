@@ -399,6 +399,28 @@ export async function restaurarSistema(arquivoBackup: string, usuario?: string, 
       await execAsync(
         `"${psqlBin}" -h ${host} -p ${port} -U ${user} -d ${database} -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"`
       );
+
+      // Reatribuir permissões no schema public ao usuário da aplicação
+      // (necessário pois o CREATE SCHEMA recria sem permissões para o usuário mercado)
+      const grantSql = [
+        `GRANT USAGE ON SCHEMA public TO "${user}";`,
+        `GRANT CREATE ON SCHEMA public TO "${user}";`,
+        `GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "${user}";`,
+        `GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "${user}";`,
+        `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "${user}";`,
+        `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO "${user}";`,
+      ].join(' ');
+      try {
+        await execAsync(
+          `"${psqlBin}" -h ${host} -p ${port} -U postgres -d ${database} -c "${grantSql}"`
+        );
+      } catch (_) {
+        // Se não tiver acesso como postgres, tenta com o próprio usuário
+        await execAsync(
+          `"${psqlBin}" -h ${host} -p ${port} -U ${user} -d ${database} -c "${grantSql}"`
+        ).catch(() => {});
+      }
+
       await execAsync(`"${psqlBin}" -h ${host} -p ${port} -U ${user} -d ${database} -f "${sqlFile}"`);
 
       // Sincronizar colunas que possam faltar no dump de versão antiga
