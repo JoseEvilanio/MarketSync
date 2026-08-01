@@ -109,8 +109,8 @@ if (-not $Empresa) {
 }
 if (-not $BackupDir) {
     $defaultBackup = Join-Path $rootDir "backups"
-    $input = Read-Host "  Diretório de backup [$defaultBackup]"
-    $BackupDir = if ($input) { $input } else { $defaultBackup }
+    $inputDir = Read-Host "  Diretório de backup [$defaultBackup]"
+    $BackupDir = if ($inputDir) { $inputDir } else { $defaultBackup }
 }
 
 # ── 4. Testar conexão com PostgreSQL ─────────────────────────────────────────
@@ -118,7 +118,7 @@ if (-not $BackupDir) {
 Write-Step "Testando conexão com o banco..."
 $env:PGPASSWORD = $PgSenha
 try {
-    $result = & "$pgBin\psql.exe" -h $PgHost -p $PgPorta -U $PgUsuario -d postgres -c "SELECT 1;" 2>&1
+    $null = & "$pgBin\psql.exe" -h $PgHost -p $PgPorta -U $PgUsuario -d postgres -c "SELECT 1;" 2>&1
     if ($LASTEXITCODE -ne 0) { Write-Fail "Não foi possível conectar ao PostgreSQL. Verifique usuário e senha." }
     Write-OK "Conexão com PostgreSQL OK"
 } catch {
@@ -172,7 +172,7 @@ $config = @"
   },
   "sistema": {
     "primeiroAcesso": false,
-    "versao": "1.0.0",
+    "versao": "1.0.4",
     "logDir": "../logs"
   }
 }

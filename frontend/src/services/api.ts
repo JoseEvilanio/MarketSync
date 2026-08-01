@@ -142,7 +142,10 @@ export const backupService = {
     form.append('arquivo', file);
     return api
       .post('/backup/restaurar-sistema', form, {
-        headers: { 'Content-Type': 'multipart/form-data', 'X-Confirm': 'true' },
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          'X-Confirm': 'true',
+        },
         timeout: 300_000,
         onUploadProgress: (e) => {
           if (onProgress && e.total) onProgress(Math.round((e.loaded * 100) / e.total));

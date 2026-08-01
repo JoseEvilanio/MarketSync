@@ -9,6 +9,8 @@ export function errorHandler(
   res: Response,
   _next: NextFunction
 ): void {
+  console.error(`[Erro API] ${req.method} ${req.url}:`, err);
+
   // Erros de validação do Zod
   if (err instanceof ZodError) {
     const messages = err.errors.map((e) => `${e.path.join('.')}: ${e.message}`);
@@ -17,9 +19,11 @@ export function errorHandler(
     return;
   }
 
-  // Erros de negócio
-  if (err instanceof AppError) {
-    res.status(err.statusCode).json({ erro: err.message });
+  // Erros de negócio / operacionais
+  const statusCode = (err as any).statusCode || (err instanceof AppError ? err.statusCode : null);
+  if (statusCode || (err as any).isOperational || err instanceof AppError) {
+    const status = statusCode || 400;
+    res.status(status).json({ erro: err.message });
     return;
   }
 
@@ -36,7 +40,7 @@ export function errorHandler(
     }
   }
 
-  // Erros desconhecidos
+  // Erros não tratados (desconhecidos)
   logger.error('Erro não tratado:', {
     message: err.message,
     stack: err.stack,
@@ -44,5 +48,5 @@ export function errorHandler(
     method: req.method,
   });
 
-  res.status(500).json({ erro: 'Erro interno do servidor' });
+  res.status(500).json({ erro: err.message || 'Erro interno do servidor' });
 }

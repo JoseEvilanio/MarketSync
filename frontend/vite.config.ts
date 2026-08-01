@@ -1,17 +1,17 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import path from 'path';
+import { fileURLToPath, URL } from 'node:url';
 
 export default defineConfig({
   plugins: [react()],
 
   resolve: {
-    alias: { '@': path.resolve(__dirname, './src') },
+    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
 
   // Build de produção — saída em ../backend/public para ser servida pelo Express
   build: {
-    outDir: path.resolve(__dirname, '../backend/public'),
+    outDir: fileURLToPath(new URL('../backend/public', import.meta.url)),
     emptyOutDir: true,
   },
 
@@ -20,15 +20,15 @@ export default defineConfig({
     proxy: {
       // Em desenvolvimento, chamadas /api são encaminhadas para o backend
       '/api': {
-        target: 'http://localhost:3001',
+        target: 'http://127.0.0.1:3002',
         changeOrigin: true,
       },
       '/health': {
-        target: 'http://localhost:3001',
+        target: 'http://127.0.0.1:3002',
         changeOrigin: true,
       },
       '/uploads': {
-        target: 'http://localhost:3001',
+        target: 'http://127.0.0.1:3002',
         changeOrigin: true,
       },
     },

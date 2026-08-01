@@ -6,7 +6,7 @@
 Unicode True
 
 !ifndef VERSION
-  !define VERSION "1.0.0"
+  !define VERSION "1.0.4"
 !endif
 
 Name                "MercadoPro ERP ${VERSION}"

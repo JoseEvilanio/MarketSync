@@ -31,6 +31,7 @@ export default function SetupWizard() {
   const [step2Data, setStep2Data] = useState<Step2Data>({});
   const [loading, setLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const form1 = useForm<Step1Data>({ resolver: zodResolver(step1Schema) });
@@ -75,7 +76,7 @@ export default function SetupWizard() {
 
   // ── Finalizar: restaurar backup ────────────────────────────────────────────
   async function handleRestore() {
-    const file = fileRef.current?.files?.[0];
+    const file = selectedFile || fileRef.current?.files?.[0];
     if (!file) {
       toast.error('Selecione um arquivo .backup');
       return;
@@ -284,16 +285,40 @@ export default function SetupWizard() {
                 <input
                   ref={fileRef}
                   type="file"
-                  accept=".backup"
+                  accept=".backup,.zip,.sql"
                   className="hidden"
-                  onChange={() => {}} // controlled via ref
+                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
                 />
-                <div className="border-2 border-dashed border-outline rounded-lg p-4 text-center hover:border-primary transition">
-                  <span className="material-symbols-outlined text-2xl text-on-surface-variant">upload_file</span>
-                  <p className="text-sm text-on-surface-variant mt-1">
-                    Clique para selecionar arquivo <code>.backup</code>
-                  </p>
-                </div>
+                {!selectedFile ? (
+                  <div className="border-2 border-dashed border-outline rounded-lg p-4 text-center hover:border-primary transition">
+                    <span className="material-symbols-outlined text-2xl text-on-surface-variant">upload_file</span>
+                    <p className="text-sm text-on-surface-variant mt-1">
+                      Clique para selecionar arquivo <code>.backup</code> ou <code>.zip</code>
+                    </p>
+                  </div>
+                ) : (
+                  <div className="bg-green-50 border border-green-300 rounded-lg p-3 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="material-symbols-outlined text-green-600 text-xl shrink-0">check_circle</span>
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-green-800 truncate">{selectedFile.name}</p>
+                        <p className="text-[10px] text-green-600">{(selectedFile.size / (1024 * 1024)).toFixed(1)} MB</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setSelectedFile(null);
+                        if (fileRef.current) fileRef.current.value = '';
+                      }}
+                      className="text-xs text-red-600 hover:text-red-800 font-semibold px-2 py-1 bg-red-50 hover:bg-red-100 rounded shrink-0"
+                    >
+                      Trocar
+                    </button>
+                  </div>
+                )}
               </label>
 
               {/* Barra de progresso */}

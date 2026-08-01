@@ -25,6 +25,8 @@ function formatDate(dateStr: string): string {
 export default function BackupPage() {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [confirmarRestaurar, setConfirmarRestaurar] = useState(false);
 
@@ -92,18 +94,64 @@ export default function BackupPage() {
     onSuccess: () => {
       toast.success('Sistema restaurado! Recarregando...');
       setConfirmarRestaurar(false);
+      setSelectedFile(null);
       setUploadProgress(0);
       setTimeout(() => window.location.reload(), 1500);
     },
-    onError: () => {
-      toast.error('Falha na restauração. Verifique o arquivo.');
+    onError: (error: any) => {
+      const mensagem = error?.response?.data?.erro || 'Falha na restauração. Verifique o arquivo.';
+      toast.error(mensagem);
       setUploadProgress(0);
     },
   });
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedFile(file);
+      setConfirmarRestaurar(false);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      const name = file.name.toLowerCase();
+      if (name.endsWith('.backup') || name.endsWith('.zip') || name.endsWith('.sql')) {
+        setSelectedFile(file);
+        setConfirmarRestaurar(false);
+      } else {
+        toast.error('Selecione um arquivo .backup, .zip ou .sql válido');
+      }
+    }
+  };
+
+  const handleRemoveFile = () => {
+    setSelectedFile(null);
+    setConfirmarRestaurar(false);
+    if (fileRef.current) {
+      fileRef.current.value = '';
+    }
+  };
+
   function handleRestaurar() {
-    const file = fileRef.current?.files?.[0];
-    if (!file) { toast.error('Selecione um arquivo .backup'); return; }
+    const file = selectedFile || fileRef.current?.files?.[0];
+    if (!file) {
+      toast.error('Selecione um arquivo .backup ou .zip antes de continuar.');
+      return;
+    }
     restaurar(file);
   }
 
@@ -228,17 +276,75 @@ export default function BackupPage() {
             </p>
           </div>
 
-          {/* Input de arquivo */}
+          {/* Input de arquivo com zona visual de carregamento */}
           <label className="block cursor-pointer">
-            <input ref={fileRef} type="file" accept=".backup" className="hidden" />
-            <div className="border-2 border-dashed border-outline rounded-xl p-5 text-center hover:border-primary transition">
-              <span className="material-symbols-outlined text-3xl text-on-surface-variant block mb-1">
-                upload_file
-              </span>
-              <p className="text-sm text-on-surface-variant">
-                Clique para selecionar o arquivo <code className="bg-surface-variant px-1 rounded">.backup</code>
-              </p>
-            </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".backup,.zip,.sql"
+              className="hidden"
+              onChange={handleFileChange}
+            />
+
+            {!selectedFile ? (
+              <div
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                className={`border-2 border-dashed rounded-xl p-6 text-center transition ${
+                  isDragging
+                    ? 'border-primary bg-primary/5 text-primary'
+                    : 'border-outline hover:border-primary text-on-surface-variant'
+                }`}
+              >
+                <span className="material-symbols-outlined text-4xl block mb-2 text-primary/80">
+                  cloud_upload
+                </span>
+                <p className="text-sm font-medium text-on-surface mb-1">
+                  Clique para selecionar ou arraste o arquivo de backup aqui
+                </p>
+                <p className="text-xs text-on-surface-variant">
+                  Aceita arquivos <code className="bg-surface-variant px-1.5 py-0.5 rounded text-primary font-mono font-semibold">.backup</code>, <code className="bg-surface-variant px-1.5 py-0.5 rounded text-primary font-mono font-semibold">.zip</code> ou <code className="bg-surface-variant px-1.5 py-0.5 rounded text-primary font-mono font-semibold">.sql</code>
+                </p>
+              </div>
+            ) : (
+              <div className="bg-green-50/90 border-2 border-green-500/50 rounded-xl p-4 flex items-center gap-4 relative">
+                <div className="w-12 h-12 rounded-xl bg-green-500/20 flex items-center justify-center shrink-0">
+                  <span className="material-symbols-outlined text-2xl text-green-700">
+                    folder_zip
+                  </span>
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-green-700 bg-green-200/80 px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                      Arquivo Carregado com Sucesso
+                    </span>
+                  </div>
+                  <p className="text-sm font-semibold text-on-surface truncate mt-1">
+                    {selectedFile.name}
+                  </p>
+                  <p className="text-xs text-on-surface-variant">
+                    Tamanho: <span className="font-medium text-on-surface">{formatBytes(selectedFile.size)}</span>
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleRemoveFile();
+                  }}
+                  className="flex items-center gap-1 text-xs font-semibold text-red-600 hover:text-red-700 bg-red-100 hover:bg-red-200 px-3 py-2 rounded-lg transition shrink-0"
+                  title="Remover e escolher outro arquivo"
+                >
+                  <span className="material-symbols-outlined text-[16px]">delete</span>
+                  Trocar arquivo
+                </button>
+              </div>
+            )}
           </label>
 
           {/* Barra de progresso */}
@@ -260,9 +366,20 @@ export default function BackupPage() {
           {/* Botão com confirmação */}
           {!confirmarRestaurar ? (
             <button
-              onClick={() => setConfirmarRestaurar(true)}
+              onClick={() => {
+                if (!selectedFile) {
+                  toast.error('Selecione um arquivo .backup ou .zip antes de continuar.');
+                  fileRef.current?.click();
+                  return;
+                }
+                setConfirmarRestaurar(true);
+              }}
               disabled={anyLoading}
-              className="w-full border-2 border-amber-500 text-amber-700 py-2.5 rounded-xl font-semibold hover:bg-amber-50 transition disabled:opacity-60"
+              className={`w-full border-2 py-2.5 rounded-xl font-semibold transition disabled:opacity-60 ${
+                selectedFile
+                  ? 'border-amber-500 text-amber-700 bg-amber-50/50 hover:bg-amber-100/70'
+                  : 'border-outline text-on-surface-variant hover:border-primary'
+              }`}
             >
               Restaurar Sistema
             </button>
@@ -281,8 +398,13 @@ export default function BackupPage() {
                 <button
                   onClick={handleRestaurar}
                   disabled={restorePending}
-                  className="flex-1 bg-red-600 text-white py-2.5 rounded-xl font-semibold hover:bg-red-700 transition disabled:opacity-60"
+                  className="flex-1 bg-red-600 text-white py-2.5 rounded-xl font-semibold hover:bg-red-700 transition disabled:opacity-60 flex items-center justify-center gap-2"
                 >
+                  {restorePending && (
+                    <span className="material-symbols-outlined animate-spin text-lg">
+                      progress_activity
+                    </span>
+                  )}
                   {restorePending ? 'Restaurando...' : 'Sim, restaurar'}
                 </button>
               </div>

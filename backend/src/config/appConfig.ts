@@ -81,7 +81,7 @@ function buildConfigFromEnv(): AppConfig {
     impressora: { cupom: '', etiquetas: '' },
     sistema: {
       primeiroAcesso: true,
-      versao: '1.0.0',
+      versao: '1.0.4',
       logDir: '../logs',
     },
   };

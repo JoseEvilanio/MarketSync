@@ -8,6 +8,8 @@ import cron from 'node-cron';
 import archiver from 'archiver';
 import { logEvent } from './logger';
 import { appConfig, saveConfig } from '../config/appConfig';
+import { AppError } from './AppError';
+import prisma from '../config/prisma';
 
 const execAsync = promisify(exec);
 
@@ -16,6 +18,23 @@ const execAsync = promisify(exec);
 function getDbCredentials() {
   const { host, porta, nome, usuario, senha } = appConfig.database;
   return { host, port: String(porta), user: usuario, password: senha, database: nome };
+}
+
+function getPgBin(binaryName: 'pg_dump' | 'psql'): string {
+  if (process.platform !== 'win32') return binaryName;
+
+  const possiblePaths = [
+    `C:\\Program Files\\PostgreSQL\\17\\bin\\${binaryName}.exe`,
+    `C:\\Program Files\\PostgreSQL\\16\\bin\\${binaryName}.exe`,
+    `C:\\Program Files\\PostgreSQL\\15\\bin\\${binaryName}.exe`,
+    `C:\\Program Files\\PostgreSQL\\14\\bin\\${binaryName}.exe`,
+    `C:\\Program Files\\PostgreSQL\\13\\bin\\${binaryName}.exe`,
+  ];
+
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) return p;
+  }
+  return binaryName;
 }
 
 export function getBackupDir(): string {
@@ -99,9 +118,7 @@ export async function runBackup(usuario?: string): Promise<BackupResult> {
 
   logEvent({ nivel: 'info', modulo: 'backup', mensagem: 'Iniciando backup...', usuario });
 
-  const pgDumpBin = process.platform === 'win32'
-    ? 'C:\\Program Files\\PostgreSQL\\15\\bin\\pg_dump.exe'
-    : 'pg_dump';
+  const pgDumpBin = getPgBin('pg_dump');
 
   const cmd = `"${pgDumpBin}" -h ${host} -p ${port} -U ${user} -d ${database} -f "${sqlFile}"`;
   process.env.PGPASSWORD = password;
@@ -220,9 +237,7 @@ export async function exportarSistema(usuario?: string): Promise<ExportResult> {
   const { host, port, user, password, database } = getDbCredentials();
   const sqlFile = path.join(tempDir, `${database}.sql`);
 
-  const pgDumpBin = process.platform === 'win32'
-    ? 'C:\\Program Files\\PostgreSQL\\15\\bin\\pg_dump.exe'
-    : 'pg_dump';
+  const pgDumpBin = getPgBin('pg_dump');
 
   process.env.PGPASSWORD = password;
 
@@ -289,64 +304,103 @@ export interface RestoreResult {
 }
 
 /**
- * Restaura o sistema a partir de um arquivo .backup:
- * - Valida metadata.json
+ * Restaura o sistema a partir de um arquivo .backup ou .zip:
+ * - Valida metadata.json (se presente)
  * - Restaura dump SQL
- * - Restaura uploads
- * - Atualiza config.json preservando credenciais atuais
+ * - Restaura uploads (se presentes)
+ * - Atualiza config.json preservando credenciais atuais (se presente)
  */
-export async function restaurarSistema(arquivoBackup: string, usuario?: string): Promise<RestoreResult> {
+export async function restaurarSistema(arquivoBackup: string, usuario?: string, nomeOriginal?: string): Promise<RestoreResult> {
   const tempDir = path.join(os.tmpdir(), `mercadopro_restore_${Date.now()}`);
   fs.mkdirSync(tempDir, { recursive: true });
 
   logEvent({ nivel: 'info', modulo: 'backup', mensagem: 'Iniciando restauração do sistema...', usuario });
 
   try {
-    // 1. Extrair ZIP/backup
-    await extrairZip(arquivoBackup, tempDir);
+    const ext = path.extname(nomeOriginal || arquivoBackup).toLowerCase();
 
-    // 2. Validar metadata.json
-    const metaPath = path.join(tempDir, 'metadata.json');
-    if (!fs.existsSync(metaPath)) {
-      throw new Error('Arquivo de backup inválido: metadata.json não encontrado');
+    // 1. Se o arquivo for .sql direto, apenas o copia para tempDir
+    if (ext === '.sql') {
+      fs.copyFileSync(arquivoBackup, path.join(tempDir, 'restore_database.sql'));
+    } else {
+      // 2. Se for .zip ou .backup, descompacta
+      await extrairZip(arquivoBackup, tempDir);
     }
-    const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as {
-      versao: string;
-      banco: string;
-      hash_md5_dump: string;
-      exportadoEm: string;
+
+    // 2. Validar metadata.json se presente (exportação completa)
+    const metaPath = path.join(tempDir, 'metadata.json');
+    let meta = {
+      versao: appConfig.sistema.versao,
+      banco: getDbCredentials().database,
+      hash_md5_dump: '',
+      exportadoEm: new Date().toISOString(),
     };
 
-    // Verificar compatibilidade de versão (mesmo major)
-    const majorAtual = parseInt(appConfig.sistema.versao.split('.')[0], 10);
-    const majorBackup = parseInt(meta.versao.split('.')[0], 10);
-    if (majorBackup !== majorAtual) {
-      throw new Error(
-        `Versão incompatível: backup v${meta.versao} não pode ser restaurado em sistema v${appConfig.sistema.versao}`
-      );
+    if (fs.existsSync(metaPath)) {
+      try {
+        const fileContent = fs.readFileSync(metaPath, 'utf-8');
+        meta = JSON.parse(fileContent);
+
+        if (meta.versao) {
+          const majorAtual = parseInt(appConfig.sistema.versao.split('.')[0], 10);
+          const majorBackup = parseInt(meta.versao.split('.')[0], 10);
+          if (!isNaN(majorAtual) && !isNaN(majorBackup) && majorBackup !== majorAtual) {
+            throw new AppError(
+              `Versão incompatível: backup v${meta.versao} não pode ser restaurado em sistema v${appConfig.sistema.versao}`,
+              400
+            );
+          }
+        }
+      } catch (err: any) {
+        if (err instanceof AppError) throw err;
+      }
     }
 
     // 3. Encontrar arquivo SQL
     const sqlFiles = fs.readdirSync(tempDir).filter((f) => f.endsWith('.sql'));
-    if (sqlFiles.length === 0) throw new Error('Arquivo de backup inválido: dump SQL não encontrado');
+    if (sqlFiles.length === 0) {
+      throw new AppError('Arquivo de backup inválido: dump SQL (.sql) não encontrado', 400);
+    }
     const sqlFile = path.join(tempDir, sqlFiles[0]);
 
     // 4. Restaurar banco com psql
     const { host, port, user, password, database } = getDbCredentials();
-
-    const psqlBin = process.platform === 'win32'
-      ? 'C:\\Program Files\\PostgreSQL\\15\\bin\\psql.exe'
-      : 'psql';
+    const psqlBin = getPgBin('psql');
 
     process.env.PGPASSWORD = password;
 
-    // Dropar conexões ativas e recriar banco
-    await execAsync(
-      `"${psqlBin}" -h ${host} -p ${port} -U ${user} -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${database}' AND pid <> pg_backend_pid();"`
-    );
-    await execAsync(`"${psqlBin}" -h ${host} -p ${port} -U ${user} -d postgres -c "DROP DATABASE IF EXISTS \\"${database}\\";" `);
-    await execAsync(`"${psqlBin}" -h ${host} -p ${port} -U ${user} -d postgres -c "CREATE DATABASE \\"${database}\\";" `);
-    await execAsync(`"${psqlBin}" -h ${host} -p ${port} -U ${user} -d ${database} -f "${sqlFile}"`);
+    try {
+      await prisma.$disconnect().catch(() => {});
+
+      // Garantir que a base de dados existe no PostgreSQL
+      try {
+        await execAsync(
+          `"${psqlBin}" -h ${host} -p ${port} -U ${user} -d postgres -c "CREATE DATABASE \\"${database}\\";"`
+        );
+      } catch (_) {
+        // Ignora erro caso o banco já exista
+      }
+
+      // Dropar e recriar o schema public para evitar bloqueios de banco em uso
+      await execAsync(
+        `"${psqlBin}" -h ${host} -p ${port} -U ${user} -d ${database} -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"`
+      );
+      await execAsync(`"${psqlBin}" -h ${host} -p ${port} -U ${user} -d ${database} -f "${sqlFile}"`);
+
+      // Sincronizar colunas que possam faltar no dump de versão antiga
+      try {
+        await execAsync(`npx prisma db push --accept-data-loss`, {
+          cwd: path.resolve(__dirname, '../..'),
+        });
+      } catch (e: any) {
+        logEvent({ nivel: 'warn', modulo: 'backup', mensagem: `Aviso ao sincronizar schema: ${e.message}` });
+      }
+
+      await prisma.$connect().catch(() => {});
+    } catch (err: any) {
+      await prisma.$connect().catch(() => {});
+      throw new AppError(`Erro na restauração do banco PostgreSQL: ${err.message || err}`, 400);
+    }
 
     // 5. Restaurar uploads
     const uploadsBackup = path.join(tempDir, 'uploads');
@@ -414,13 +468,34 @@ async function compactarDiretorioEmZip(srcDir: string, destZip: string): Promise
 }
 
 async function extrairZip(zipPath: string, destDir: string): Promise<void> {
-  // Usa node nativo (unzip) ou o módulo 'adm-zip' via dynamic require
-  // Estratégia: usar 'archiver' não extrai — usamos o módulo nativo ou powershell no Windows
-  if (process.platform === 'win32') {
-    await execAsync(
-      `powershell -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${destDir}' -Force"`
-    );
-  } else {
-    await execAsync(`unzip -o "${zipPath}" -d "${destDir}"`);
+  let targetZip = zipPath;
+  let tempCreated = false;
+
+  // Se o arquivo temporário do Multer não tiver a extensão .zip, cria uma cópia temporária com a extensão .zip
+  // para que o PowerShell Expand-Archive aceite descompactar o arquivo sem dar erro NotSupportedArchiveFileExtension
+  if (!zipPath.toLowerCase().endsWith('.zip')) {
+    targetZip = `${zipPath}_temp.zip`;
+    fs.copyFileSync(zipPath, targetZip);
+    tempCreated = true;
+  }
+
+  try {
+    if (process.platform === 'win32') {
+      const safeZip = targetZip.replace(/'/g, "''");
+      const safeDest = destDir.replace(/'/g, "''");
+      await execAsync(
+        `powershell -Command "Expand-Archive -Path '${safeZip}' -DestinationPath '${safeDest}' -Force"`
+      );
+    } else {
+      await execAsync(`unzip -o "${targetZip}" -d "${destDir}"`);
+    }
+  } catch (err: any) {
+    throw new AppError(`Falha ao descompactar arquivo de backup: ${err.message || err}`, 400);
+  } finally {
+    if (tempCreated && fs.existsSync(targetZip)) {
+      try {
+        fs.unlinkSync(targetZip);
+      } catch (_) {}
+    }
   }
 }

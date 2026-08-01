@@ -88,7 +88,7 @@ if (env.NODE_ENV === 'production') {
 app.use(errorHandler);
 
 // Iniciar servidor
-app.listen(env.PORT, () => {
+app.listen(env.PORT, '0.0.0.0', () => {
   logEvent({
     nivel: 'info',
     modulo: 'sistema',

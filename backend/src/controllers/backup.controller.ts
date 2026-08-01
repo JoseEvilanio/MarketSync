@@ -12,13 +12,6 @@ import { AppError } from '../utils/AppError';
 export const uploadBackup = multer({
   dest: os.tmpdir(),
   limits: { fileSize: 2 * 1024 * 1024 * 1024 }, // 2 GB
-  fileFilter(_req, file, cb) {
-    if (file.originalname.endsWith('.backup') || file.mimetype === 'application/zip') {
-      cb(null, true);
-    } else {
-      cb(new AppError('Apenas arquivos .backup são aceitos', 400) as unknown as null, false);
-    }
-  },
 });
 
 export async function executarBackup(req: AuthRequest, res: Response): Promise<void> {
@@ -40,7 +33,7 @@ export async function downloadBackup(req: AuthRequest, res: Response): Promise<v
   const nomeParam = (req.params.nome || req.query.nome || '') as string;
   const safeName = path.basename(nomeParam);
 
-  if (!safeName || (!safeName.endsWith('.zip') && !safeName.endsWith('.backup'))) {
+  if (!safeName || (!safeName.endsWith('.zip') && !safeName.endsWith('.backup') && !safeName.endsWith('.sql'))) {
     throw new AppError('Nome de arquivo inválido', 400);
   }
 
@@ -78,8 +71,16 @@ export async function restaurar(req: AuthRequest, res: Response): Promise<void> 
   }
 
   const file = req.file;
-  if (!file) throw new AppError('Arquivo .backup não enviado', 400);
+  if (!file) throw new AppError('Arquivo de backup não enviado ou formato inválido', 400);
 
-  const result = await restaurarSistema(file.path, req.usuario?.id);
-  res.json(result);
+  try {
+    const result = await restaurarSistema(file.path, req.usuario?.id, file.originalname);
+    res.json(result);
+  } finally {
+    if (file?.path && fs.existsSync(file.path)) {
+      try {
+        fs.unlinkSync(file.path);
+      } catch (_) {}
+    }
+  }
 }
