@@ -303,10 +303,24 @@ export interface RestoreResult {
   mensagem: string;
 }
 
+function isZipFile(filePath: string): boolean {
+  try {
+    const buffer = Buffer.alloc(4);
+    const fd = fs.openSync(filePath, 'r');
+    fs.readSync(fd, buffer, 0, 4, 0);
+    fs.closeSync(fd);
+    return buffer[0] === 0x50 && buffer[1] === 0x4b;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Restaura o sistema a partir de um arquivo .backup ou .zip:
+ * Restaura o sistema a partir de um arquivo .backup, .zip ou .sql:
+ * - Valida se é um arquivo ZIP compacto (PK magic bytes) ou SQL puro
  * - Valida metadata.json (se presente)
  * - Restaura dump SQL
+ * - Sincroniza schema do Prisma automaticamente
  * - Restaura uploads (se presentes)
  * - Atualiza config.json preservando credenciais atuais (se presente)
  */
@@ -317,14 +331,14 @@ export async function restaurarSistema(arquivoBackup: string, usuario?: string, 
   logEvent({ nivel: 'info', modulo: 'backup', mensagem: 'Iniciando restauração do sistema...', usuario });
 
   try {
-    const ext = path.extname(nomeOriginal || arquivoBackup).toLowerCase();
+    const isZip = isZipFile(arquivoBackup);
 
-    // 1. Se o arquivo for .sql direto, apenas o copia para tempDir
-    if (ext === '.sql') {
-      fs.copyFileSync(arquivoBackup, path.join(tempDir, 'restore_database.sql'));
-    } else {
-      // 2. Se for .zip ou .backup, descompacta
+    // 1. Se for um arquivo compactado (ZIP/backup), descompacta
+    if (isZip) {
       await extrairZip(arquivoBackup, tempDir);
+    } else {
+      // 2. Se for um arquivo SQL puro, copia direto para o diretório de restauração
+      fs.copyFileSync(arquivoBackup, path.join(tempDir, 'restore_database.sql'));
     }
 
     // 2. Validar metadata.json se presente (exportação completa)
