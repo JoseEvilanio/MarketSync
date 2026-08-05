@@ -38,11 +38,23 @@ function getPgBin(binaryName: 'pg_dump' | 'psql'): string {
 }
 
 export function getBackupDir(): string {
-  return path.resolve(
-    path.dirname(require.resolve('../config/appConfig')),
-    '../..',
-    appConfig.backup.diretorio
-  );
+  const dir = appConfig.backup.diretorio;
+  // Se o config.json tiver um caminho absoluto (instalação via NSIS), usa direto.
+  // Caso contrário (dev / terminal), resolve relativo à raiz do backend (dois níveis acima de dist/utils/).
+  if (path.isAbsolute(dir)) return dir;
+  return path.resolve(__dirname, '../..', dir);
+}
+
+/**
+ * Pasta temporária para uploads do Multer.
+ * Usa uma subpasta dentro do diretório do backend para garantir permissão de escrita
+ * tanto no terminal (dev) quanto no Windows Service instalado.
+ * C:\Windows\Temp não é acessível para serviços que rodam como LocalSystem sem perfil de usuário.
+ */
+export function getUploadTempDir(): string {
+  const dir = path.resolve(__dirname, '../../uploads-temp');
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -229,7 +241,7 @@ export interface ExportResult {
  */
 export async function exportarSistema(usuario?: string): Promise<ExportResult> {
   const inicio = Date.now();
-  const tempDir = path.join(os.tmpdir(), `mercadopro_export_${Date.now()}`);
+  const tempDir = path.join(getUploadTempDir(), `export_${Date.now()}`);
   fs.mkdirSync(tempDir, { recursive: true });
 
   logEvent({ nivel: 'info', modulo: 'backup', mensagem: 'Iniciando exportação completa do sistema...', usuario });
@@ -325,7 +337,7 @@ function isZipFile(filePath: string): boolean {
  * - Atualiza config.json preservando credenciais atuais (se presente)
  */
 export async function restaurarSistema(arquivoBackup: string, usuario?: string, nomeOriginal?: string): Promise<RestoreResult> {
-  const tempDir = path.join(os.tmpdir(), `mercadopro_restore_${Date.now()}`);
+  const tempDir = path.join(getUploadTempDir(), `restore_${Date.now()}`);
   fs.mkdirSync(tempDir, { recursive: true });
 
   logEvent({ nivel: 'info', modulo: 'backup', mensagem: 'Iniciando restauração do sistema...', usuario });
@@ -395,41 +407,66 @@ export async function restaurarSistema(arquivoBackup: string, usuario?: string, 
         // Ignora erro caso o banco já exista
       }
 
-      // Dropar e recriar o schema public para evitar bloqueios de banco em uso
-      await execAsync(
-        `"${psqlBin}" -h ${host} -p ${port} -U ${user} -d ${database} -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"`
-      );
+      // Limpar todos os objetos do schema public sem precisar ser dono do schema.
+      // Passamos o SQL via arquivo temporário para evitar problemas de escape
+      // na linha de comando com blocos PL/pgSQL que contêm aspas e cifrões.
+      const cleanupSql = `
+DO $$ DECLARE r RECORD; BEGIN
+  FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
+    EXECUTE 'DROP TABLE IF EXISTS public.' || quote_ident(r.tablename) || ' CASCADE';
+  END LOOP;
+  FOR r IN (SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = 'public') LOOP
+    EXECUTE 'DROP SEQUENCE IF EXISTS public.' || quote_ident(r.sequence_name) || ' CASCADE';
+  END LOOP;
+  FOR r IN (SELECT table_name FROM information_schema.views WHERE table_schema = 'public') LOOP
+    EXECUTE 'DROP VIEW IF EXISTS public.' || quote_ident(r.table_name) || ' CASCADE';
+  END LOOP;
+  FOR r IN (SELECT typname FROM pg_type WHERE typtype = 'e' AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')) LOOP
+    EXECUTE 'DROP TYPE IF EXISTS public.' || quote_ident(r.typname) || ' CASCADE';
+  END LOOP;
+END $$;
+`.trim();
 
-      // Reatribuir permissões no schema public ao usuário da aplicação
-      // (necessário pois o CREATE SCHEMA recria sem permissões para o usuário mercado)
-      const grantSql = [
-        `GRANT USAGE ON SCHEMA public TO "${user}";`,
-        `GRANT CREATE ON SCHEMA public TO "${user}";`,
-        `GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "${user}";`,
-        `GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "${user}";`,
-        `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "${user}";`,
-        `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO "${user}";`,
-      ].join(' ');
+      const cleanupFile = path.join(tempDir, '_cleanup.sql');
+      fs.writeFileSync(cleanupFile, cleanupSql, 'utf-8');
+
       try {
         await execAsync(
-          `"${psqlBin}" -h ${host} -p ${port} -U postgres -d ${database} -c "${grantSql}"`
+          `"${psqlBin}" -h ${host} -p ${port} -U ${user} -d ${database} -f "${cleanupFile}"`
         );
-      } catch (_) {
-        // Se não tiver acesso como postgres, tenta com o próprio usuário
-        await execAsync(
-          `"${psqlBin}" -h ${host} -p ${port} -U ${user} -d ${database} -c "${grantSql}"`
-        ).catch(() => {});
+      } catch (cleanErr: any) {
+        logEvent({ nivel: 'warn', modulo: 'backup', mensagem: `Limpeza do schema: ${cleanErr.message}` });
       }
 
       await execAsync(`"${psqlBin}" -h ${host} -p ${port} -U ${user} -d ${database} -f "${sqlFile}"`);
 
-      // Sincronizar colunas que possam faltar no dump de versão antiga
-      try {
-        await execAsync(`npx prisma db push --accept-data-loss`, {
-          cwd: path.resolve(__dirname, '../..'),
-        });
-      } catch (e: any) {
-        logEvent({ nivel: 'warn', modulo: 'backup', mensagem: `Aviso ao sincronizar schema: ${e.message}` });
+      // Sincronizar schema SOMENTE se o backup vier de versão diferente.
+      // O "prisma db push --accept-data-loss" recria tabelas divergentes e APAGA dados —
+      // nunca deve rodar após um restore do mesmo sistema pois desfaz exatamente o que
+      // o psql acabou de restaurar.
+      const versaoAtual = appConfig.sistema.versao;
+      const versaoBackup = meta?.versao ?? versaoAtual;
+      const majorAtual  = parseInt(versaoAtual.split('.')[0], 10);
+      const majorBackup = parseInt(versaoBackup.split('.')[0], 10);
+      const minorAtual  = parseInt(versaoAtual.split('.')[1] ?? '0', 10);
+      const minorBackup = parseInt(versaoBackup.split('.')[1] ?? '0', 10);
+      const precisaSincronizar = majorBackup < majorAtual || minorBackup < minorAtual;
+
+      if (precisaSincronizar) {
+        logEvent({ nivel: 'info', modulo: 'backup', mensagem: `Backup v${versaoBackup} → sistema v${versaoAtual}: sincronizando schema...` });
+        try {
+          const prismaBin = path.resolve(__dirname, '../../node_modules/.bin/prisma');
+          const nodeExe   = process.execPath;
+          const backendDir = path.resolve(__dirname, '../..');
+          await execAsync(`"${nodeExe}" "${prismaBin}" db push --accept-data-loss`, {
+            cwd: backendDir,
+            env: { ...process.env },
+          });
+        } catch (e: any) {
+          logEvent({ nivel: 'warn', modulo: 'backup', mensagem: `Aviso ao sincronizar schema: ${e.message}` });
+        }
+      } else {
+        logEvent({ nivel: 'info', modulo: 'backup', mensagem: `Backup v${versaoBackup} mesma versão — schema não alterado, dados preservados.` });
       }
 
       await prisma.$connect().catch(() => {});
@@ -507,8 +544,7 @@ async function extrairZip(zipPath: string, destDir: string): Promise<void> {
   let targetZip = zipPath;
   let tempCreated = false;
 
-  // Se o arquivo temporário do Multer não tiver a extensão .zip, cria uma cópia temporária com a extensão .zip
-  // para que o PowerShell Expand-Archive aceite descompactar o arquivo sem dar erro NotSupportedArchiveFileExtension
+  // Multer salva o arquivo sem extensão; PowerShell Expand-Archive exige .zip
   if (!zipPath.toLowerCase().endsWith('.zip')) {
     targetZip = `${zipPath}_temp.zip`;
     fs.copyFileSync(zipPath, targetZip);
@@ -517,11 +553,16 @@ async function extrairZip(zipPath: string, destDir: string): Promise<void> {
 
   try {
     if (process.platform === 'win32') {
-      const safeZip = targetZip.replace(/'/g, "''");
-      const safeDest = destDir.replace(/'/g, "''");
-      await execAsync(
-        `powershell -Command "Expand-Archive -Path '${safeZip}' -DestinationPath '${safeDest}' -Force"`
-      );
+      // Usar & { } com variáveis para evitar quebra quando o caminho contém espaços
+      // (ex.: C:\Program Files\MercadoPro\...). Aspas internas não resolvem esse problema
+      // porque o PowerShell interpreta o caminho como comando — o operador & com bloco
+      // de script garante que os literais são tratados como strings puras.
+      const script = [
+        `$src  = '${targetZip.replace(/'/g, "''")}'`,
+        `$dest = '${destDir.replace(/'/g, "''")}'`,
+        `Expand-Archive -LiteralPath $src -DestinationPath $dest -Force`,
+      ].join('; ');
+      await execAsync(`powershell -NoProfile -NonInteractive -Command "${script}"`);
     } else {
       await execAsync(`unzip -o "${targetZip}" -d "${destDir}"`);
     }
@@ -529,9 +570,7 @@ async function extrairZip(zipPath: string, destDir: string): Promise<void> {
     throw new AppError(`Falha ao descompactar arquivo de backup: ${err.message || err}`, 400);
   } finally {
     if (tempCreated && fs.existsSync(targetZip)) {
-      try {
-        fs.unlinkSync(targetZip);
-      } catch (_) {}
+      try { fs.unlinkSync(targetZip); } catch (_) {}
     }
   }
 }

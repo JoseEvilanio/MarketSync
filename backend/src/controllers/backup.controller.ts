@@ -2,15 +2,15 @@ import { Response } from 'express';
 import path from 'path';
 import fs from 'fs';
 import multer from 'multer';
-import os from 'os';
-import { runBackup, listarBackups, exportarSistema, restaurarSistema, getBackupDir } from '../utils/backup';
+import { runBackup, listarBackups, exportarSistema, restaurarSistema, getBackupDir, getUploadTempDir } from '../utils/backup';
 import { logEvent } from '../utils/logger';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import { AppError } from '../utils/AppError';
 
-// Multer: uploads temporários em pasta do sistema
+// Multer: uploads temporários na pasta de trabalho do backend
+// Evita usar os.tmpdir() que no Windows Service retorna C:\Windows\Temp (sem permissão de escrita)
 export const uploadBackup = multer({
-  dest: os.tmpdir(),
+  dest: getUploadTempDir(),
   limits: { fileSize: 2 * 1024 * 1024 * 1024 }, // 2 GB
 });
 

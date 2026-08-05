@@ -2,8 +2,28 @@ import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
 
-// Carregar .env antes de tudo (necessário para Prisma CLI e compatibilidade)
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+// Carregar .env antes de tudo (necessário para Prisma CLI e compatibilidade).
+//
+// O caminho de __dirname muda conforme o ambiente:
+//   - Desenvolvimento (ts-node):  src/config/  → sobe 2 níveis → raiz do backend ✓
+//   - Build compilado (node dist): dist/config/ → sobe 2 níveis → raiz do backend ✓
+//
+// Mas quando o NSSM define CONFIG_PATH via AppEnvironmentExtra, o .env pode estar
+// tanto em dist/config/../../.env quanto já estar ausente (vars vieram pelo NSSM).
+// Por isso tentamos os dois caminhos candidatos antes de desistir.
+(function carregarDotEnv() {
+  const candidatos = [
+    path.resolve(__dirname, '../../.env'),   // src/config ou dist/config → raiz backend
+    path.resolve(__dirname, '../../../.env'), // caso raro onde __dirname resolve diferente
+  ];
+  for (const p of candidatos) {
+    if (fs.existsSync(p)) {
+      dotenv.config({ path: p });
+      break;
+    }
+  }
+  // Se nenhum arquivo .env existir (serviço NSSM injeta vars diretamente), ok — segue adiante.
+})();
 
 export interface AppConfig {
   empresa: string;

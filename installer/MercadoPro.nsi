@@ -206,17 +206,18 @@ Section "MercadoPro ERP" SecPrincipal
   Call GerarDotEnv
 
   ; --- 5. Migracoes Prisma ---
+  ; Passar DATABASE_URL explicitamente pois nsExec nao herda variaveis do usuario atual
   DetailPrint "Aplicando migracoes do banco..."
-  nsExec::ExecToLog '"$INSTDIR\Runtime\node\node.exe" "$INSTDIR\Backend\node_modules\.bin\prisma" migrate deploy'
+  nsExec::ExecToLog 'cmd.exe /c set "DATABASE_URL=postgresql://mercado:$SenhaApp@localhost:5432/mercadopro_db" && set "CONFIG_PATH=$INSTDIR\Backend\config\config.json" && "$INSTDIR\Runtime\node\node.exe" "$INSTDIR\Backend\node_modules\.bin\prisma" migrate deploy'
 
   ; --- 6. Seed inicial ---
   DetailPrint "Inserindo dados iniciais..."
-  nsExec::ExecToLog '"$INSTDIR\Runtime\node\node.exe" "$INSTDIR\Backend\dist\prisma\seed.js"'
+  nsExec::ExecToLog 'cmd.exe /c set "DATABASE_URL=postgresql://mercado:$SenhaApp@localhost:5432/mercadopro_db" && set "CONFIG_PATH=$INSTDIR\Backend\config\config.json" && "$INSTDIR\Runtime\node\node.exe" "$INSTDIR\Backend\dist\prisma\seed.js"'
 
   ; --- 7. Restaurar backup (opcional) ---
   ${If} $TipoInstalacao == "restaurar"
     DetailPrint "Restaurando backup..."
-    nsExec::ExecToLog '"$INSTDIR\Runtime\node\node.exe" "$INSTDIR\Backend\dist\utils\restoreHelper.js" "$ArquivoBackup"'
+    nsExec::ExecToLog 'cmd.exe /c set "DATABASE_URL=postgresql://mercado:$SenhaApp@localhost:5432/mercadopro_db" && set "CONFIG_PATH=$INSTDIR\Backend\config\config.json" && "$INSTDIR\Runtime\node\node.exe" "$INSTDIR\Backend\dist\utils\restoreHelper.js" "$ArquivoBackup"'
   ${EndIf}
 
   ; --- 8. Instalar servico Windows ---
@@ -313,7 +314,18 @@ Function InstalarServico
   nsExec::ExecToLog '"$INSTDIR\Tools\nssm.exe" set MercadoProService AppParameters "dist\server.js"'
   nsExec::ExecToLog '"$INSTDIR\Tools\nssm.exe" set MercadoProService DisplayName "MercadoPro ERP"'
   nsExec::ExecToLog '"$INSTDIR\Tools\nssm.exe" set MercadoProService Start SERVICE_AUTO_START'
-  nsExec::ExecToLog '"$INSTDIR\Tools\nssm.exe" set MercadoProService AppEnvironmentExtra "NODE_ENV=production" "CONFIG_PATH=$INSTDIR\Backend\config\config.json"'
+
+  ; Passar TODAS as variaveis necessarias explicitamente.
+  ; Servicos Windows nao herdam o ambiente do usuario logado, portanto DATABASE_URL,
+  ; JWT_SECRET, PORT etc. chegariam vazios se dependessem apenas do .env ou do perfil.
+  ; Cada variavel e passada como argumento separado para o NSSM para evitar problemas
+  ; de parsing com espacos e aspas numa unica string longa.
+  nsExec::ExecToLog '"$INSTDIR\Tools\nssm.exe" set MercadoProService AppEnvironmentExtra "NODE_ENV=production" "CONFIG_PATH=$INSTDIR\Backend\config\config.json" "DATABASE_URL=postgresql://mercado:$SenhaApp@localhost:5432/mercadopro_db" "JWT_SECRET=mercadopro_jwt_${VERSION}_local" "JWT_EXPIRES_IN=8h" "PORT=3001" "TEMP=$INSTDIR\Temp" "TMP=$INSTDIR\Temp"'
+
+  ; Criar pasta Temp dentro do backend para o Multer/uploads temporarios
+  ; (C:\Windows\Temp nao tem permissao de escrita para o LocalSystem sem perfil)
+  CreateDirectory "$INSTDIR\Temp"
+
   nsExec::ExecToLog '"$INSTDIR\Tools\nssm.exe" set MercadoProService AppStdout "$INSTDIR\Logs\service.log"'
   nsExec::ExecToLog '"$INSTDIR\Tools\nssm.exe" set MercadoProService AppStderr "$INSTDIR\Logs\service-error.log"'
   nsExec::ExecToLog '"$INSTDIR\Tools\nssm.exe" set MercadoProService AppRestartDelay 5000'

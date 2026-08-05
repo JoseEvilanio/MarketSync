@@ -113,17 +113,17 @@ export default function BackupPage() {
     }
   };
 
-  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+  const handleDragOver = (e: React.DragEvent<HTMLElement>) => {
     e.preventDefault();
     setIsDragging(true);
   };
 
-  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+  const handleDragLeave = (e: React.DragEvent<HTMLElement>) => {
     e.preventDefault();
     setIsDragging(false);
   };
 
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+  const handleDrop = (e: React.DragEvent<HTMLElement>) => {
     e.preventDefault();
     setIsDragging(false);
     const file = e.dataTransfer.files?.[0];
@@ -276,76 +276,81 @@ export default function BackupPage() {
             </p>
           </div>
 
-          {/* Input de arquivo com zona visual de carregamento */}
-          <label className="block cursor-pointer">
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".backup,.zip,.sql"
-              className="hidden"
-              onChange={handleFileChange}
-            />
+          {/* Input de arquivo — hidden, ativado pelo label via htmlFor ou por fileRef.click() */}
+          <input
+            id="backup-file-input"
+            ref={fileRef}
+            type="file"
+            accept=".backup,.zip,.sql"
+            className="hidden"
+            onChange={handleFileChange}
+          />
 
-            {!selectedFile ? (
-              <div
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                className={`border-2 border-dashed rounded-xl p-6 text-center transition ${
-                  isDragging
-                    ? 'border-primary bg-primary/5 text-primary'
-                    : 'border-outline hover:border-primary text-on-surface-variant'
-                }`}
-              >
-                <span className="material-symbols-outlined text-4xl block mb-2 text-primary/80">
-                  cloud_upload
+          {/* Zona de drop — só visível quando nenhum arquivo foi selecionado */}
+          {!selectedFile ? (
+            // htmlFor conecta o label ao input pelo id — clique em qualquer parte
+            // da zona abre o seletor de arquivos sem depender de posicionamento DOM.
+            <label
+              htmlFor="backup-file-input"
+              className={`block cursor-pointer border-2 border-dashed rounded-xl p-6 text-center transition ${
+                isDragging
+                  ? 'border-primary bg-primary/5 text-primary'
+                  : 'border-outline hover:border-primary text-on-surface-variant'
+              }`}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              <span className="material-symbols-outlined text-4xl block mb-2 text-primary/80">
+                cloud_upload
+              </span>
+              <p className="text-sm font-medium text-on-surface mb-1">
+                Clique para selecionar ou arraste o arquivo de backup aqui
+              </p>
+              <p className="text-xs text-on-surface-variant">
+                Aceita arquivos{' '}
+                <code className="bg-surface-variant px-1.5 py-0.5 rounded text-primary font-mono font-semibold">.backup</code>,{' '}
+                <code className="bg-surface-variant px-1.5 py-0.5 rounded text-primary font-mono font-semibold">.zip</code>{' '}
+                ou{' '}
+                <code className="bg-surface-variant px-1.5 py-0.5 rounded text-primary font-mono font-semibold">.sql</code>
+              </p>
+            </label>
+          ) : (
+            // Fora do label — cliques aqui nunca abrem o seletor de arquivos
+            <div className="bg-green-50/90 border-2 border-green-500/50 rounded-xl p-4 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-green-500/20 flex items-center justify-center shrink-0">
+                <span className="material-symbols-outlined text-2xl text-green-700">
+                  folder_zip
                 </span>
-                <p className="text-sm font-medium text-on-surface mb-1">
-                  Clique para selecionar ou arraste o arquivo de backup aqui
-                </p>
-                <p className="text-xs text-on-surface-variant">
-                  Aceita arquivos <code className="bg-surface-variant px-1.5 py-0.5 rounded text-primary font-mono font-semibold">.backup</code>, <code className="bg-surface-variant px-1.5 py-0.5 rounded text-primary font-mono font-semibold">.zip</code> ou <code className="bg-surface-variant px-1.5 py-0.5 rounded text-primary font-mono font-semibold">.sql</code>
-                </p>
               </div>
-            ) : (
-              <div className="bg-green-50/90 border-2 border-green-500/50 rounded-xl p-4 flex items-center gap-4 relative">
-                <div className="w-12 h-12 rounded-xl bg-green-500/20 flex items-center justify-center shrink-0">
-                  <span className="material-symbols-outlined text-2xl text-green-700">
-                    folder_zip
+
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-green-700 bg-green-200/80 px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                    Arquivo selecionado
                   </span>
                 </div>
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-green-700 bg-green-200/80 px-2 py-0.5 rounded-full flex items-center gap-1">
-                      <span className="material-symbols-outlined text-[14px]">check_circle</span>
-                      Arquivo Carregado com Sucesso
-                    </span>
-                  </div>
-                  <p className="text-sm font-semibold text-on-surface truncate mt-1">
-                    {selectedFile.name}
-                  </p>
-                  <p className="text-xs text-on-surface-variant">
-                    Tamanho: <span className="font-medium text-on-surface">{formatBytes(selectedFile.size)}</span>
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    handleRemoveFile();
-                  }}
-                  className="flex items-center gap-1 text-xs font-semibold text-red-600 hover:text-red-700 bg-red-100 hover:bg-red-200 px-3 py-2 rounded-lg transition shrink-0"
-                  title="Remover e escolher outro arquivo"
-                >
-                  <span className="material-symbols-outlined text-[16px]">delete</span>
-                  Trocar arquivo
-                </button>
+                <p className="text-sm font-semibold text-on-surface truncate mt-1">
+                  {selectedFile.name}
+                </p>
+                <p className="text-xs text-on-surface-variant">
+                  Tamanho:{' '}
+                  <span className="font-medium text-on-surface">{formatBytes(selectedFile.size)}</span>
+                </p>
               </div>
-            )}
-          </label>
+
+              <button
+                type="button"
+                onClick={handleRemoveFile}
+                className="flex items-center gap-1 text-xs font-semibold text-red-600 hover:text-red-700 bg-red-100 hover:bg-red-200 px-3 py-2 rounded-lg transition shrink-0"
+                title="Remover e escolher outro arquivo"
+              >
+                <span className="material-symbols-outlined text-[16px]">delete</span>
+                Trocar arquivo
+              </button>
+            </div>
+          )}
 
           {/* Barra de progresso */}
           {uploadProgress > 0 && (
