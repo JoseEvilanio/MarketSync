@@ -27,7 +27,7 @@ function Write-Log {
     try { Add-Content -Path $logFile -Value $linha -Encoding UTF8 -ErrorAction SilentlyContinue } catch {}
 }
 
-function Run-Psql {
+function Invoke-Psql {
     param([string]$senha, [string]$sql)
     $env:PGPASSWORD = $senha
     $out = & $psql -U postgres -d postgres -c $sql 2>&1
@@ -36,7 +36,7 @@ function Run-Psql {
     return @{ Code = $code; Output = ($out -join " ") }
 }
 
-function Run-PsqlQuery {
+function Invoke-PsqlQuery {
     param([string]$senha, [string]$query)
     $env:PGPASSWORD = $senha
     $out = & $psql -U postgres -d postgres -tAc $query 2>&1
@@ -159,6 +159,23 @@ if ($checkDb.Trim() -eq "0" -or $checkDb.Trim() -eq "") {
     # Garantir que o owner e correto
     $out = & $psql -U postgres -d postgres -c "ALTER DATABASE mercadopro_db OWNER TO mercado;" 2>&1
     Write-Log "Owner atualizado: $($out -join ' ')"
+}
+$env:PGPASSWORD = ""
+
+# --- Conceder permissoes no schema public ao usuario 'mercado' ---
+Write-Log "Concedendo permissoes no schema public ao usuario 'mercado'..."
+$env:PGPASSWORD = $senhaPg
+$grantSqls = @(
+    "GRANT USAGE ON SCHEMA public TO mercado;"
+    "GRANT CREATE ON SCHEMA public TO mercado;"
+    "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO mercado;"
+    "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO mercado;"
+    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO mercado;"
+    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO mercado;"
+)
+foreach ($sql in $grantSqls) {
+    $out = & $psql -U postgres -d mercadopro_db -c $sql 2>&1
+    Write-Log "GRANT: $sql -> $($out -join ' ')"
 }
 $env:PGPASSWORD = ""
 

@@ -27,7 +27,7 @@ function Write-Log {
     try { Add-Content -Path $logFile -Value $linha -Encoding UTF8 -ErrorAction SilentlyContinue } catch {}
 }
 
-function Run-Psql {
+function Invoke-Psql {
     param([string]$senha, [string]$sql)
     $env:PGPASSWORD = $senha
     $out = & $psql -U postgres -d postgres -c $sql 2>&1
@@ -36,7 +36,7 @@ function Run-Psql {
     return @{ Code = $code; Output = ($out -join " ") }
 }
 
-function Run-PsqlQuery {
+function Invoke-PsqlQuery {
     param([string]$senha, [string]$query)
     $env:PGPASSWORD = $senha
     $out = & $psql -U postgres -d postgres -tAc $query 2>&1
