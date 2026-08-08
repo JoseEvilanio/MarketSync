@@ -290,3 +290,18 @@ ALTER TABLE "_PedidoNotasFiscais" ADD CONSTRAINT "_PedidoNotasFiscais_A_fkey" FO
 
 -- AddForeignKey
 ALTER TABLE "_PedidoNotasFiscais" ADD CONSTRAINT "_PedidoNotasFiscais_B_fkey" FOREIGN KEY ("B") REFERENCES "pedidos_compra"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- Garantir permissões do usuário da aplicação no schema public
+-- (necessário após resets/restores onde o Prisma recria o schema)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mercado') THEN
+    GRANT USAGE  ON SCHEMA public TO mercado;
+    GRANT CREATE ON SCHEMA public TO mercado;
+    GRANT ALL PRIVILEGES ON ALL TABLES    IN SCHEMA public TO mercado;
+    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO mercado;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES    TO mercado;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO mercado;
+  END IF;
+END
+$$;

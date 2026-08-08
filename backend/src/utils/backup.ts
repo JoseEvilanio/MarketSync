@@ -446,6 +446,24 @@ END $$;
 
       await execAsync(`"${psqlBin}" -h ${host} -p ${port} -U ${user} -d ${database} -f "${sqlFile}"`);
 
+      // Reparar permissões do schema public — pode perder-se após restore
+      // quando o dono do schema é postgres e o usuário da app é diferente
+      const grantSql = [
+        `GRANT USAGE ON SCHEMA public TO "${user}";`,
+        `GRANT CREATE ON SCHEMA public TO "${user}";`,
+        `GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "${user}";`,
+        `GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "${user}";`,
+        `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "${user}";`,
+        `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO "${user}";`,
+      ].join(' ');
+      const grantFile = path.join(tempDir, '_grant.sql');
+      fs.writeFileSync(grantFile, grantSql, 'utf-8');
+      try {
+        await execAsync(`"${psqlBin}" -h ${host} -p ${port} -U postgres -d ${database} -f "${grantFile}"`);
+      } catch {
+        // Se não tiver acesso como postgres (dev), silencia — permissões já existem
+      }
+
       // Sincronizar schema SOMENTE se o backup vier de versão diferente.
       // O "prisma db push --accept-data-loss" recria tabelas divergentes e APAGA dados —
       // nunca deve rodar após um restore do mesmo sistema pois desfaz exatamente o que

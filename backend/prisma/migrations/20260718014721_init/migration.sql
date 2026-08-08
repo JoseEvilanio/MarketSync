@@ -371,3 +371,17 @@ ALTER TABLE "etiquetas" ADD CONSTRAINT "etiquetas_produtoId_fkey" FOREIGN KEY ("
 
 -- AddForeignKey
 ALTER TABLE "auditoria" ADD CONSTRAINT "auditoria_usuarioId_fkey" FOREIGN KEY ("usuarioId") REFERENCES "usuarios"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- Garantir permissões do usuário da aplicação no schema public
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mercado') THEN
+    GRANT USAGE  ON SCHEMA public TO mercado;
+    GRANT CREATE ON SCHEMA public TO mercado;
+    GRANT ALL PRIVILEGES ON ALL TABLES    IN SCHEMA public TO mercado;
+    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO mercado;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES    TO mercado;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO mercado;
+  END IF;
+END
+$$;
