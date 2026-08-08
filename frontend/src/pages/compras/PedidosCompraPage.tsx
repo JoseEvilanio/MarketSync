@@ -5,6 +5,8 @@ import { pedidosService, fornecedoresService, produtosService } from '@/services
 import { formatCurrency, formatDateTime } from '@/utils/format';
 import Modal from '@/components/ui/Modal';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import ImportarXmlModal from '@/components/compras/ImportarXmlModal';
+import ConferenciaPage from './ConferenciaPage';
 
 const STATUS_CFG: Record<string, { label: string; cls: string }> = {
   RASCUNHO:       { label: 'Rascunho',        cls: 'badge-neutral' },
@@ -27,6 +29,8 @@ export default function PedidosCompraPage() {
   const [filtroStatus, setFiltroStatus] = useState('');
   const [modalNovo, setModalNovo]   = useState(false);
   const [modalDetalhe, setModalDetalhe] = useState<any>(null);
+  const [importarParaPedido, setImportarParaPedido] = useState<any>(null);
+  const [conferenciaId, setConferenciaId] = useState<string | null>(null);
 
   // Form
   const [fornecedorId, setFornecedorId] = useState('');
@@ -97,6 +101,16 @@ export default function PedidosCompraPage() {
 
   return (
     <div className="space-y-4">
+
+      {/* Modo conferência — renderiza ConferenciaPage inline */}
+      {conferenciaId && (
+        <ConferenciaPage
+          notaFiscalId={conferenciaId}
+          onVoltar={() => { setConferenciaId(null); qc.invalidateQueries({ queryKey: ['pedidos'] }); }}
+        />
+      )}
+
+      {conferenciaId ? null : (<>
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-on-surface">Pedidos de Compra</h2>
@@ -143,12 +157,21 @@ export default function PedidosCompraPage() {
                     <td className="td">
                       <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={async () => setModalDetalhe(await pedidosService.buscarId(p.id))}
-                          className="p-1 text-primary hover:bg-surface-container-low rounded">
+                          className="p-1 text-primary hover:bg-surface-container-low rounded" title="Ver detalhes">
                           <span className="material-symbols-outlined text-[18px]">visibility</span>
                         </button>
+                        {/* Botão de importar NF-e diretamente da linha — para pedidos que aguardam NF-e */}
+                        {['ABERTO','ENVIADO','FATURADO'].includes(p.status) && (
+                          <button onClick={() => setImportarParaPedido(p)}
+                            className="flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-100 hover:bg-green-200 px-2 py-1 rounded-lg transition"
+                            title="Importar NF-e para este pedido">
+                            <span className="material-symbols-outlined text-[14px]">upload_file</span>
+                            NF-e
+                          </button>
+                        )}
                         {p.status === 'RASCUNHO' && (
                           <button onClick={() => { if (confirm('Cancelar pedido?')) cancelar.mutate(p.id); }}
-                            className="p-1 text-error hover:bg-error-container rounded">
+                            className="p-1 text-error hover:bg-error-container rounded" title="Cancelar">
                             <span className="material-symbols-outlined text-[18px]">cancel</span>
                           </button>
                         )}
@@ -295,6 +318,14 @@ export default function PedidosCompraPage() {
                     <span className="material-symbols-outlined text-[16px]">send</span> Enviar ao Fornecedor
                   </button>
                 )}
+                {/* Próximo passo: importar NF-e quando pedido foi enviado/faturado */}
+                {['ENVIADO', 'FATURADO'].includes(modalDetalhe.status) && (
+                  <button onClick={() => { setModalDetalhe(null); setImportarParaPedido(modalDetalhe); }}
+                    className="btn-success flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[18px]">upload_file</span>
+                    Importar NF-e do Fornecedor
+                  </button>
+                )}
                 {['RASCUNHO', 'ABERTO', 'ENVIADO'].includes(modalDetalhe.status) && (
                   <button onClick={() => { if (confirm('Cancelar pedido?')) cancelar.mutate(modalDetalhe.id); }}
                     disabled={cancelar.isPending} className="btn-outline text-error border-error hover:bg-error-container">
@@ -303,9 +334,35 @@ export default function PedidosCompraPage() {
                 )}
               </div>
             </div>
+
+            {/* Guia de próximos passos */}
+            {['ENVIADO', 'FATURADO'].includes(modalDetalhe.status) && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
+                <p className="font-semibold flex items-center gap-1 mb-1">
+                  <span className="material-symbols-outlined text-[16px]">info</span>
+                  Próximo passo
+                </p>
+                <p>Quando o fornecedor emitir a nota fiscal, clique em <strong>"Importar NF-e do Fornecedor"</strong> para carregar o XML. O sistema vai comparar o pedido com a NF-e e permitir a conferência dos itens antes de dar entrada no estoque.</p>
+              </div>
+            )}
           </div>
         </Modal>
       )}
+
+      {/* Modal Importar NF-e — disparado pelo botão "Importar NF-e do Fornecedor" */}
+      {importarParaPedido && (
+        <ImportarXmlModal
+          open={!!importarParaPedido}
+          onClose={() => setImportarParaPedido(null)}
+          onSuccess={(nf) => {
+            setImportarParaPedido(null);
+            qc.invalidateQueries({ queryKey: ['pedidos'] });
+            // Ir direto para a conferência após importar
+            setConferenciaId(nf.id);
+          }}
+        />
+      )}
+      </>)}
     </div>
   );
 }
