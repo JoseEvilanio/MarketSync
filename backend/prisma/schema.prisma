@@ -30,6 +30,9 @@ model Usuario {
   caixas     Caixa[]
   movimentosCaixa MovimentoCaixa[]
   auditorias Auditoria[]
+  pedidosCompra        PedidoCompra[]
+  recebimentos         Recebimento[]
+  divergenciasResolvidas Divergencia[] @relation("DivergenciaResolvidaPor")
 
   @@map("usuarios")
 }
@@ -71,6 +74,9 @@ model Fornecedor {
 
   produtos    Produto[]
   compras     Compra[]
+  pedidosCompra    PedidoCompra[]
+  notasFiscais     NotaFiscalEntrada[]
+  produtoFornecedor ProdutoFornecedor[]
 
   @@map("fornecedores")
 }
@@ -119,6 +125,11 @@ model Produto {
   itensCompra     ItemCompra[]
   movimentosEstoque MovimentoEstoque[]
   etiquetas       Etiqueta[]
+  pedidosCompraItens  PedidoCompraItem[]
+  notaFiscalItens     NotaFiscalItem[]
+  produtoFornecedor   ProdutoFornecedor[]
+  recebimentosItens   RecebimentoItem[]
+  divergencias        Divergencia[]
 
   @@map("produtos")
 }
@@ -294,12 +305,63 @@ model ItemVenda {
   @@map("itens_venda")
 }
 
-// ─────────────── COMPRAS ───────────────
+// ─────────────── COMPRAS (legado) ───────────────
 
 enum StatusCompra {
   RASCUNHO
   CONCLUIDA
   CANCELADA
+}
+
+// ─────────────── PEDIDOS DE COMPRA ───────────────
+
+enum StatusPedidoCompra {
+  RASCUNHO
+  ABERTO
+  ENVIADO
+  FATURADO
+  EM_CONFERENCIA
+  PARCIAL
+  RECEBIDO
+  CONCLUIDO
+  CANCELADO
+  DIVERGENTE
+}
+
+// ─────────────── NOTAS FISCAIS DE ENTRADA ───────────────
+
+enum StatusNotaFiscal {
+  IMPORTADA
+  AGUARDANDO_VINCULO
+  EM_CONFERENCIA
+  COM_DIVERGENCIA
+  APROVADA
+  RECEBIDA
+  CANCELADA
+}
+
+// ─────────────── RECEBIMENTOS ───────────────
+
+enum StatusRecebimento {
+  PENDENTE
+  CONCLUIDO
+  CANCELADO
+}
+
+// ─────────────── DIVERGÊNCIAS ───────────────
+
+enum TipoDivergencia {
+  QUANTIDADE_MENOR
+  QUANTIDADE_MAIOR
+  PRECO_DIFERENTE
+  PRODUTO_NAO_SOLICITADO
+  PRODUTO_NAO_IDENTIFICADO
+}
+
+enum StatusDivergencia {
+  PENDENTE
+  RESOLVIDA
+  IGNORADA
 }
 
 model Compra {
@@ -343,10 +405,12 @@ enum TipoMovimentoEstoque {
   ENTRADA_COMPRA
   ENTRADA_AJUSTE
   ENTRADA_DEVOLUCAO
+  ENTRADA_NFE
   SAIDA_VENDA
   SAIDA_PERDA
   SAIDA_CONSUMO
   SAIDA_AJUSTE
+  SAIDA_ESTORNO_NFE
 }
 
 model MovimentoEstoque {
@@ -396,6 +460,178 @@ model Auditoria {
   usuario    Usuario?  @relation(fields: [usuarioId], references: [id])
 
   @@map("auditoria")
+}
+
+// ─────────────── PEDIDOS DE COMPRA ───────────────
+
+model PedidoCompra {
+  id           String             @id @default(uuid())
+  numero       Int                @unique @default(autoincrement())
+  fornecedorId String?
+  usuarioId    String
+  status       StatusPedidoCompra @default(RASCUNHO)
+  total        Decimal            @db.Decimal(10, 2) @default(0)
+  observacao   String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  deletedAt    DateTime?
+
+  fornecedor   Fornecedor?        @relation(fields: [fornecedorId], references: [id])
+  usuario      Usuario            @relation(fields: [usuarioId], references: [id])
+  itens        PedidoCompraItem[]
+  notasFiscais NotaFiscalEntrada[] @relation("PedidoNotasFiscais")
+
+  @@map("pedidos_compra")
+}
+
+model PedidoCompraItem {
+  id                 String       @id @default(uuid())
+  pedidoId           String
+  produtoId          String
+  quantidade         Float
+  quantidadeRecebida Float        @default(0)
+  precoUnitario      Decimal      @db.Decimal(10, 2)
+  subtotal           Decimal      @db.Decimal(10, 2)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  pedido             PedidoCompra @relation(fields: [pedidoId], references: [id])
+  produto            Produto      @relation(fields: [produtoId], references: [id])
+
+  @@map("pedidos_compra_itens")
+}
+
+// ─────────────── NOTAS FISCAIS DE ENTRADA ───────────────
+
+model NotaFiscalEntrada {
+  id            String           @id @default(uuid())
+  fornecedorId  String?
+  chaveAcesso   String           @unique
+  numero        String
+  serie         String
+  dataEmissao   DateTime
+  dataEntrada   DateTime?
+  valorTotal    Decimal          @db.Decimal(10, 2)
+  status        StatusNotaFiscal @default(IMPORTADA)
+  xmlPath       String?
+  observacao    String?
+  cnpjEmitente  String?
+  nomeEmitente  String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  deletedAt     DateTime?
+
+  fornecedor    Fornecedor?      @relation(fields: [fornecedorId], references: [id])
+  itens         NotaFiscalItem[]
+  recebimentos  Recebimento[]
+  pedidos       PedidoCompra[]   @relation("PedidoNotasFiscais")
+  divergencias  Divergencia[]
+
+  @@map("notas_fiscais_entrada")
+}
+
+model NotaFiscalItem {
+  id               String            @id @default(uuid())
+  notaFiscalId     String
+  produtoId        String?
+  codigoFornecedor String
+  gtin             String?
+  descricao        String
+  ncm              String?
+  cfop             String?
+  unidade          String            @default("UN")
+  quantidade       Float
+  valorUnitario    Decimal           @db.Decimal(10, 2)
+  desconto         Decimal           @db.Decimal(10, 2) @default(0)
+  valorTotal       Decimal           @db.Decimal(10, 2)
+  identificado     Boolean           @default(false)
+  createdAt        DateTime          @default(now())
+
+  notaFiscal       NotaFiscalEntrada @relation(fields: [notaFiscalId], references: [id])
+  produto          Produto?          @relation(fields: [produtoId], references: [id])
+
+  @@map("notas_fiscais_itens")
+}
+
+// ─────────────── PRODUTO × FORNECEDOR ───────────────
+
+model ProdutoFornecedor {
+  id                  String     @id @default(uuid())
+  produtoId           String
+  fornecedorId        String
+  codigoFornecedor    String
+  gtin                String?
+  descricaoFornecedor String?
+  ativo               Boolean    @default(true)
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  produto             Produto    @relation(fields: [produtoId], references: [id])
+  fornecedor          Fornecedor @relation(fields: [fornecedorId], references: [id])
+
+  @@unique([fornecedorId, codigoFornecedor])
+  @@map("produto_fornecedor")
+}
+
+// ─────────────── RECEBIMENTOS ───────────────
+
+model Recebimento {
+  id              String            @id @default(uuid())
+  notaFiscalId    String
+  usuarioId       String
+  status          StatusRecebimento @default(PENDENTE)
+  dataRecebimento DateTime          @default(now())
+  observacao      String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  notaFiscal      NotaFiscalEntrada @relation(fields: [notaFiscalId], references: [id])
+  usuario         Usuario           @relation(fields: [usuarioId], references: [id])
+  itens           RecebimentoItem[]
+
+  @@map("recebimentos")
+}
+
+model RecebimentoItem {
+  id            String      @id @default(uuid())
+  recebimentoId String
+  produtoId     String
+  quantidade    Float
+  valorUnitario Decimal     @db.Decimal(10, 2)
+  subtotal      Decimal     @db.Decimal(10, 2)
+  createdAt     DateTime    @default(now())
+
+  recebimento   Recebimento @relation(fields: [recebimentoId], references: [id])
+  produto       Produto     @relation(fields: [produtoId], references: [id])
+
+  @@map("recebimentos_itens")
+}
+
+// ─────────────── DIVERGÊNCIAS ───────────────
+
+model Divergencia {
+  id                 String            @id @default(uuid())
+  notaFiscalId       String
+  produtoId          String?
+  tipo               TipoDivergencia
+  status             StatusDivergencia @default(PENDENTE)
+  quantidadePedida   Float?
+  quantidadeNfe      Float?
+  quantidadeAceita   Float?
+  precoPedido        Decimal?          @db.Decimal(10, 2)
+  precoNfe           Decimal?          @db.Decimal(10, 2)
+  descricaoItem      String?
+  resolvidoPorId     String?
+  resolvidoEm        DateTime?
+  observacao         String?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  notaFiscal         NotaFiscalEntrada @relation(fields: [notaFiscalId], references: [id])
+  produto            Produto?          @relation(fields: [produtoId], references: [id])
+  resolvidoPor       Usuario?          @relation("DivergenciaResolvidaPor", fields: [resolvidoPorId], references: [id])
+
+  @@map("divergencias")
 }
 
 // ─────────────── CONFIGURAÇÕES ───────────────

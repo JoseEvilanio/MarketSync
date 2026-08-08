@@ -279,6 +279,12 @@ export async function exportarSistema(usuario?: string): Promise<ExportResult> {
       copiarDiretorio(uploadsDir, path.join(tempDir, 'uploads'));
     }
 
+    // 5b. Copiar XMLs de NF-e (se existir)
+    const storageNfeDir = path.resolve(__dirname, '../../storage/notas-fiscais');
+    if (fs.existsSync(storageNfeDir)) {
+      copiarDiretorio(storageNfeDir, path.join(tempDir, 'storage', 'notas-fiscais'));
+    }
+
     // 6. Compactar em .backup (ZIP renomeado)
     const dataSuffix = new Date().toISOString().slice(0, 10).replace(/-/g, '_');
     const pacoteNome = `MercadoPro_${dataSuffix}.backup`;
@@ -481,6 +487,14 @@ END $$;
     if (fs.existsSync(uploadsBackup)) {
       fs.rmSync(uploadsDir, { recursive: true, force: true });
       copiarDiretorio(uploadsBackup, uploadsDir);
+    }
+
+    // 5b. Restaurar XMLs de NF-e
+    const storageNfeBackup = path.join(tempDir, 'storage', 'notas-fiscais');
+    const storageNfeDir    = path.resolve(__dirname, '../../storage/notas-fiscais');
+    if (fs.existsSync(storageNfeBackup)) {
+      if (!fs.existsSync(storageNfeDir)) fs.mkdirSync(storageNfeDir, { recursive: true });
+      copiarDiretorio(storageNfeBackup, storageNfeDir);
     }
 
     // 6. Restaurar config.json preservando credenciais do banco atual
