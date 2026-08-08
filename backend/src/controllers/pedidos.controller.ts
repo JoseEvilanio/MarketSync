@@ -72,6 +72,19 @@ export async function criar(req: AuthRequest, res: Response): Promise<void> {
   const data  = pedidoSchema.parse(req.body);
   const total = calcularTotal(data.itens);
 
+  // Verificar se o usuário do token ainda existe no banco.
+  // Pode falhar após um reset/restauração do banco onde os UUIDs mudaram.
+  const usuarioExiste = await prisma.usuario.findUnique({
+    where: { id: req.usuario!.id },
+    select: { id: true },
+  });
+  if (!usuarioExiste) {
+    throw new AppError(
+      'Sessão expirada: seu usuário não foi encontrado no banco. Faça logout e entre novamente.',
+      401
+    );
+  }
+
   const pedido = await (prisma as any).pedidoCompra.create({
     data: {
       fornecedorId: data.fornecedorId ?? null,

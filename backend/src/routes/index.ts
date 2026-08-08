@@ -30,11 +30,13 @@ router.use('/fornecedores', fornecedoresRoutes);
 router.use('/caixa', caixaRoutes);
 router.use('/vendas', vendasRoutes);
 router.use('/estoque', estoqueRoutes);
-router.use('/compras', comprasRoutes);
-// ── Módulo NF-e e Recebimento v2.0 ──────────────────────────────────────────
+// ── Módulo NF-e e Recebimento v2.0 — registrar ANTES de /compras ────────────
+// O Express processa rotas na ordem de registro. Se /compras vier primeiro,
+// ele intercepta /compras/pedidos e os novos módulos nunca são alcançados.
 router.use('/compras/pedidos',        pedidosRoutes);
 router.use('/compras/notas-fiscais',  notasFiscaisRoutes);
 router.use('/compras/recebimentos',   recebimentosRoutes);
+router.use('/compras', comprasRoutes);
 router.use('/relatorios', relatoriosRoutes);
 router.use('/backup', backupRoutes);
 router.use('/configuracoes', configuracoesRoutes);
