@@ -1,0 +1,1 @@
+{"status":"ok","versao":"1.0.4","banco":"conectado","empresa":"Mercadinho jose","timestamp":"2026-08-08T12:53:50.274Z"}
