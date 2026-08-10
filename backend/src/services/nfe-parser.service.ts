@@ -57,24 +57,66 @@ function parseData(raw: any): Date | null {
 }
 
 /**
- * Extrai a chave de acesso (44 dígitos) de várias posições possíveis no XML.
- * 1. protNFe/infProt/chNFe
- * 2. Atributo Id da tag infNFe (remove prefixo "NFe")
- * 3. NFe/infNFe/ide — monta a chave a partir dos campos da NF-e
+ * Extrai a chave de acesso (44 dígitos) de todas as posições possíveis no XML.
+ *
+ * Casos reais encontrados em NF-e brasileiras:
+ * 1. nfeProc/protNFe/infProt/chNFe          — NF-e autorizada (mais comum)
+ * 2. NFe/infNFe @Id="NFe{44 dígitos}"       — atributo Id da tag infNFe
+ * 3. nfeProc/NFe/infNFe @Id="NFe{44 dígitos}"
+ * 4. Construída a partir dos campos ide      — cUF+AAMM+CNPJ+mod+serie+nNF+tpEmis+cNF+cDV
  */
-function extrairChave(nfeNode: any, protNode: any): string {
-  // Opção 1: protNFe
+function extrairChave(nfeNode: any, protNode: any, infNFe: any, emit: any, ide: any): string {
+  // ── Opção 1: protNFe/infProt/chNFe (NF-e autorizada) ────────────────────
   const chProto = protNode?.infProt?.chNFe;
-  if (chProto && String(chProto).replace(/\D/g, '').length === 44) {
-    return String(chProto).replace(/\D/g, '');
+  if (chProto) {
+    const ch = String(chProto).replace(/\D/g, '');
+    if (ch.length === 44) return ch;
   }
 
-  // Opção 2: atributo Id da infNFe
-  const attrId: string = nfeNode?.infNFe?.['@_Id'] ?? '';
-  const chId = attrId.replace(/^NFe/, '').replace(/\D/g, '');
-  if (chId.length === 44) return chId;
+  // ── Opção 2 e 3: atributo @Id da tag infNFe ──────────────────────────────
+  // O atributo pode estar em infNFe diretamente ou em nfeNode.infNFe
+  const candidatosId = [
+    infNFe?.['@_Id'],
+    nfeNode?.infNFe?.['@_Id'],
+    nfeNode?.['@_Id'],
+  ];
+  for (const attrId of candidatosId) {
+    if (!attrId) continue;
+    const ch = String(attrId).replace(/^NFe/i, '').replace(/\D/g, '');
+    if (ch.length === 44) return ch;
+  }
 
-  throw new AppError('Chave de acesso não encontrada no XML da NF-e', 422);
+  // ── Opção 4: cChave ou chNFe direto em infNFe ou ide ────────────────────
+  const chDireto = infNFe?.chNFe ?? ide?.chNFe;
+  if (chDireto) {
+    const ch = String(chDireto).replace(/\D/g, '');
+    if (ch.length === 44) return ch;
+  }
+
+  // ── Opção 5: construir a partir dos campos de ide ────────────────────────
+  // cUF(2) + AAMM(4) + CNPJ(14) + mod(2) + serie(3) + nNF(9) + tpEmis(1) + cNF(8) + cDV(1)
+  try {
+    if (ide && emit) {
+      const cUF   = String(ide?.cUF   ?? '').padStart(2, '0');
+      const dhEmi = String(ide?.dhEmi ?? ide?.dEmi ?? '');
+      const aamm  = dhEmi.replace(/\D/g, '').substring(2, 6); // AAMM
+      const cnpj  = String(emit?.CNPJ ?? '').replace(/\D/g, '').padStart(14, '0');
+      const mod   = String(ide?.mod   ?? '55').padStart(2, '0');
+      const serie = String(ide?.serie ?? '').padStart(3, '0');
+      const nNF   = String(ide?.nNF   ?? '').padStart(9, '0');
+      const tpEmis = String(ide?.tpEmis ?? '1');
+      const cNF   = String(ide?.cNF   ?? '').padStart(8, '0');
+      const cDV   = String(ide?.cDV   ?? '');
+      const ch    = `${cUF}${aamm}${cnpj}${mod}${serie}${nNF}${tpEmis}${cNF}${cDV}`.replace(/\D/g, '');
+      if (ch.length === 44) return ch;
+    }
+  } catch { /* ignora */ }
+
+  throw new AppError(
+    'Chave de acesso não encontrada no XML da NF-e. ' +
+    'Verifique se o arquivo é uma NF-e válida (modelo 55 ou 65) e tente novamente.',
+    422
+  );
 }
 
 export function parseNFeXml(xmlContent: string): NFeParseResult {
@@ -95,13 +137,18 @@ export function parseNFeXml(xmlContent: string): NFeParseResult {
     throw new AppError(`XML inválido: ${err.message}`, 422);
   }
 
-  // Suporta nfeProcNFe (NF-e processada) e NFeProc (variação)
+  // Suporta todas as variações de envelope NF-e encontradas na prática:
+  // - nfeProc (NF-e processada/autorizada — mais comum)
+  // - NFeProc (variação de capitalização)
+  // - NFe diretamente na raiz (sem envelope de protocolo)
+  // - nfeProcNFe (variação rara)
   const root = parsed?.nfeProc ?? parsed?.NFeProc ?? parsed?.nfeProcNFe ?? parsed;
 
-  const nfeNode = root?.NFe ?? root?.nfe;
+  // A tag NFe pode estar dentro do envelope ou na raiz
+  const nfeNode = root?.NFe ?? root?.nfe ?? (parsed?.NFe ? parsed : null);
   if (!nfeNode) throw new AppError('Arquivo não é uma NF-e válida (tag NFe não encontrada)', 422);
 
-  const infNFe = nfeNode?.infNFe;
+  const infNFe = nfeNode?.infNFe ?? nfeNode?.NFe?.infNFe;
   if (!infNFe) throw new AppError('Estrutura da NF-e inválida: infNFe ausente', 422);
 
   const ide    = infNFe?.ide;
@@ -112,7 +159,7 @@ export function parseNFeXml(xmlContent: string): NFeParseResult {
   if (!ide || !emit) throw new AppError('NF-e inválida: ide ou emit ausentes', 422);
 
   // Chave de acesso
-  const chaveAcesso = extrairChave(nfeNode, protNode);
+  const chaveAcesso = extrairChave(nfeNode, protNode, infNFe, emit, ide);
 
   // Emitente
   const cnpj = String(emit?.CNPJ ?? emit?.CPF ?? '').replace(/\D/g, '');

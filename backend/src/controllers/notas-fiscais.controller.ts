@@ -7,6 +7,7 @@ import prisma from '../config/prisma';
 import { AppError } from '../utils/AppError';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import { registrarAuditoria } from '../utils/auditoria';
+import { logEvent } from '../utils/logger';
 import { parseNFeXml } from '../services/nfe-parser.service';
 import {
   identificarItensNfe,
@@ -64,12 +65,25 @@ export async function importar(req: AuthRequest, res: Response): Promise<void> {
   try {
     xmlContent = fs.readFileSync(req.file.path, 'utf-8');
   } finally {
-    // Limpar arquivo temporário sempre
     try { fs.unlinkSync(req.file.path); } catch (_) {}
   }
 
   // Parsear XML
-  const nfeParsed = parseNFeXml(xmlContent);
+  let nfeParsed;
+  try {
+    nfeParsed = parseNFeXml(xmlContent);
+  } catch (err: any) {
+    // Em erro de parse, logar a estrutura raiz para diagnóstico
+    try {
+      const { XMLParser } = require('fast-xml-parser');
+      const p = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
+      const parsed = p.parse(xmlContent);
+      const raiz = Object.keys(parsed).join(', ');
+      logEvent({ nivel: 'warn', modulo: 'nfe', mensagem: `Falha no parse. Tags raiz: [${raiz}]. Erro: ${err.message}` });
+    } catch { /* ignora */ }
+    if (err instanceof AppError) throw err;
+    throw new AppError(`Falha ao processar XML: ${err.message}`, 422);
+  }
 
   // Verificar duplicidade de chave de acesso
   const existente = await (prisma as any).notaFiscalEntrada.findUnique({
