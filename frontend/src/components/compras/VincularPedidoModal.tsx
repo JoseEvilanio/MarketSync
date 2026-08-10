@@ -24,7 +24,7 @@ export default function VincularPedidoModal({ open, onClose, notaFiscalId, forne
   const { data, isLoading } = useQuery({
     queryKey: ['pedidos-abertos', fornecedorId],
     queryFn: () => pedidosService.listar({
-      status: 'ABERTO,ENVIADO,FATURADO',
+      status: 'ABERTO,ENVIADO,FATURADO,EM_CONFERENCIA,PARCIAL',
       fornecedorId: fornecedorId ?? undefined,
       limit: 50,
     }),

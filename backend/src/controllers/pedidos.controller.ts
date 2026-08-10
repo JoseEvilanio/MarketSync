@@ -31,7 +31,12 @@ export async function listar(req: AuthRequest, res: Response): Promise<void> {
   const { page = '1', limit = '20', status, fornecedorId } = req.query as any;
   const skip  = (Number(page) - 1) * Number(limit);
   const where: any = { deletedAt: null };
-  if (status)      where.status      = status;
+
+  // status pode ser valor único ("ABERTO") ou lista separada por vírgula ("ABERTO,ENVIADO,FATURADO")
+  if (status) {
+    const valores = String(status).split(',').map((s: string) => s.trim()).filter(Boolean);
+    where.status = valores.length === 1 ? valores[0] : { in: valores };
+  }
   if (fornecedorId) where.fornecedorId = fornecedorId;
 
   const [pedidos, total] = await Promise.all([
