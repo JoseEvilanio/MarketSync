@@ -6,7 +6,44 @@ Sistema de gestão comercial (ERP) integrado a um módulo de Frente de Caixa (PD
 
 ## Versão
 
-**v2.0.0** — Módulo completo de Compras, NF-e e Recebimento.
+**v2.1.0** — Módulo de Entrada, Repositório e Conferência de NF-e.
+
+### Novidades v2.1.0
+
+**NF-e — Campos fiscais completos:**
+- `situacaoFiscal` (AUTORIZADA / CANCELADA / DENEGADA / DESCONHECIDA) — extraído do protocolo SEFAZ via `cStat`
+- `xmlHash` SHA-256 — integridade do XML verificada no download
+- `modelo` (55 = NF-e, 65 = NFC-e), `protocolo` e `dataAutorizacao` do protocolo SEFAZ
+- `destinatarioCnpj` e `destinatarioNome` — validação de destino da NF-e
+- Campos tributários por item: `cest`, `csosn`, `cst`, `valorIcms`, `valorIpi`, `valorPis`, `valorCofins`
+- `statusIdentificacao` por item (EAN / CODIGO_FORNECEDOR / MANUAL / NAO_IDENTIFICADO) — persistido no banco
+
+**NF-e — Novos endpoints:**
+- `GET /api/compras/notas-fiscais/chave/:chave` — busca direta pela chave de 44 dígitos
+- `GET /api/compras/notas-fiscais/:id/xml` — download do XML com verificação de integridade SHA-256
+- `GET /api/compras/notas-fiscais/:id/eventos` — linha do tempo de eventos da NF-e
+- `POST /api/compras/pedidos/:id/faturar` — transição ENVIADO → FATURADO
+- Filtros avançados na listagem: número, série, chave, período, situaçãoFiscal, vinculação de pedido
+
+**Divergências automáticas:**
+- Persistidas automaticamente ao vincular pedido (não apenas calculadas em memória)
+- Classificação formal: BLOQUEANTE (impede recebimento) vs ALERTA (pode ser autorizado)
+- Novo tipo: `PRODUTO_FALTANTE` — item no pedido sem correspondente na NF-e
+- Tabela `NfePedido` explícita com metadados de vínculo (quem vinculou, quando, observação)
+
+**Linha do tempo (EventoNfe):**
+- Todos os eventos registrados automaticamente: importação, identificação de fornecedor/produtos, vínculo, divergências, recebimento, estorno
+- Estrutura preparada para futura Manifestação do Destinatário (SEFAZ)
+- Exibida na aba "Histórico de Eventos" da tela de conferência
+
+**Custo separado:**
+- `precoCompra` = último custo de aquisição (preço desta NF-e)
+- `custoMedio` = preço médio ponderado (acumulado ao longo do tempo)
+
+**Frontend:**
+- Tela de conferência redesenhada: abas Conferência/Eventos, contadores visuais, chave formatada com copiar
+- `ImportarXmlModal` com etapas: upload → resultado (mostra fornecedor identificado + pedidos sugeridos)
+- Componentes: `NfeTimeline`, `NfeChaveField`, `DivergenciaBadge`, `FornecedorStatusCard`, `PedidoSugeridoCard`
 
 ---
 
@@ -210,7 +247,11 @@ O sistema permite importar o XML de NF-e recebidas dos fornecedores.
 
 - A **chave de acesso de 44 dígitos** é o identificador único — não permite duplicatas
 - Suporta NF-e nos formatos `nfeProc` (autorizada) e `NFeProc`
-- Extrai: número, série, datas, emitente (CNPJ/nome), itens completos (NCM, CFOP, unidade, quantidades, valores)
+- Extrai: número, série, datas, emitente (CNPJ/nome), destinatário, **protocolo SEFAZ**, itens completos (NCM, CFOP, unidade, quantidades, valores, impostos)
+- **Situação fiscal separada do status operacional** — uma NF-e denegada não pode ser recebida
+- **Hash SHA-256** do XML armazenado — integridade verificada no download
+- **Campos tributários** por item: ICMS, IPI, PIS, COFINS, CEST, CSOSN/CST
+- **Linha do tempo de eventos** — auditoria completa de cada operação
 - Funciona **100% offline** — nenhuma consulta externa à SEFAZ
 
 ### Clientes
@@ -341,6 +382,7 @@ GET    /api/compras/pedidos/:id
 PUT    /api/compras/pedidos/:id
 POST   /api/compras/pedidos/:id/abrir
 POST   /api/compras/pedidos/:id/enviar
+POST   /api/compras/pedidos/:id/faturar           # ENVIADO → FATURADO
 POST   /api/compras/pedidos/:id/cancelar
 GET    /api/compras/pedidos/dashboard
 ```
@@ -350,7 +392,10 @@ GET    /api/compras/pedidos/dashboard
 ```
 GET    /api/compras/notas-fiscais
 POST   /api/compras/notas-fiscais/importar        # multipart/form-data (.xml)
+GET    /api/compras/notas-fiscais/chave/:chave    # busca por chave de 44 dígitos
 GET    /api/compras/notas-fiscais/:id
+GET    /api/compras/notas-fiscais/:id/xml         # download com verificação SHA-256
+GET    /api/compras/notas-fiscais/:id/eventos     # linha do tempo
 POST   /api/compras/notas-fiscais/:id/vincular-pedido
 POST   /api/compras/notas-fiscais/:id/identificar-produto
 GET    /api/compras/notas-fiscais/:id/conferencia

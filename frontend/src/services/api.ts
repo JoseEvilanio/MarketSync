@@ -200,6 +200,8 @@ export const pedidosService = {
     api.post(`/compras/pedidos/${id}/abrir`).then((r) => r.data),
   enviar: (id: string) =>
     api.post(`/compras/pedidos/${id}/enviar`).then((r) => r.data),
+  faturar: (id: string) =>
+    api.post(`/compras/pedidos/${id}/faturar`).then((r) => r.data),
   cancelar: (id: string) =>
     api.post(`/compras/pedidos/${id}/cancelar`).then((r) => r.data),
 };
@@ -209,6 +211,8 @@ export const notasFiscaisService = {
     api.get('/compras/notas-fiscais', { params }).then((r) => r.data),
   buscarId: (id: string) =>
     api.get(`/compras/notas-fiscais/${id}`).then((r) => r.data),
+  buscarPorChave: (chave: string) =>
+    api.get(`/compras/notas-fiscais/chave/${chave}`).then((r) => r.data),
   importar: (arquivo: File, onProgress?: (pct: number) => void) => {
     const form = new FormData();
     form.append('arquivo', arquivo);
@@ -220,8 +224,8 @@ export const notasFiscaisService = {
       },
     }).then((r) => r.data);
   },
-  vincularPedido: (id: string, pedidoIds: string[]) =>
-    api.post(`/compras/notas-fiscais/${id}/vincular-pedido`, { pedidoIds }).then((r) => r.data),
+  vincularPedido: (id: string, pedidoIds: string[], observacao?: string) =>
+    api.post(`/compras/notas-fiscais/${id}/vincular-pedido`, { pedidoIds, observacao }).then((r) => r.data),
   identificarProduto: (id: string, data: { notaFiscalItemId: string; produtoId: string; salvarRelacionamento?: boolean }) =>
     api.post(`/compras/notas-fiscais/${id}/identificar-produto`, data).then((r) => r.data),
   getConferencia: (id: string) =>
@@ -232,6 +236,9 @@ export const notasFiscaisService = {
     api.post(`/compras/notas-fiscais/${id}/cancelar`).then((r) => r.data),
   estornar: (id: string) =>
     api.post(`/compras/notas-fiscais/${id}/estornar`).then((r) => r.data),
+  listarEventos: (id: string) =>
+    api.get(`/compras/notas-fiscais/${id}/eventos`).then((r) => r.data),
+  downloadXmlUrl: (id: string) => `/api/compras/notas-fiscais/${id}/xml`,
 };
 
 export const recebimentosService = {

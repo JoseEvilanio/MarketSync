@@ -1,104 +1,118 @@
 import prisma from '../config/prisma';
 import { AppError } from '../utils/AppError';
 import { registrarAuditoria } from '../utils/auditoria';
+import { registrarEventoNfe } from './nfe-eventos.service';
 
-// ── Tipos públicos ────────────────────────────────────────────────────────────
+// ── Tipos ─────────────────────────────────────────────────────────────────────
 
 export interface ItemReceber {
   notaFiscalItemId: string;
-  produtoId: string;
-  quantidade: number;
-  valorUnitario: number;
+  produtoId:        string;
+  quantidade:       number;
+  valorUnitario:    number;
 }
 
 export interface ConfirmarRecebimentoParams {
-  notaFiscalId:  string;
-  usuarioId:     string;
-  itens:         ItemReceber[];
-  observacao?:   string;
+  notaFiscalId: string;
+  usuarioId:    string;
+  itens:        ItemReceber[];
+  observacao?:  string;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Calcula o preço médio ponderado entre estoque atual e novo lote. */
-function calcularPrecoMedio(
-  estoqueAtual:   number,
-  precoAtual:     number,
-  qtdNova:        number,
-  precoNovo:      number
+/** Preço médio ponderado entre estoque atual e novo lote. */
+function calcularCustoMedio(
+  estoqueAtual: number,
+  custoAtual:   number,
+  qtdNova:      number,
+  precoNovo:    number
 ): number {
   const totalQtd = estoqueAtual + qtdNova;
   if (totalQtd <= 0) return precoNovo;
-  return (estoqueAtual * precoAtual + qtdNova * precoNovo) / totalQtd;
+  return (estoqueAtual * custoAtual + qtdNova * precoNovo) / totalQtd;
 }
 
-// ── Serviço principal ─────────────────────────────────────────────────────────
+// ── Confirmar recebimento ─────────────────────────────────────────────────────
 
 /**
- * Confirma o recebimento de uma NF-e em uma transação atômica:
- * 1. Cria Recebimento + RecebimentoItens
- * 2. Movimenta estoque (ENTRADA_NFE) por produto
- * 3. Atualiza estoqueAtual e precoCompra (preço médio ponderado)
- * 4. Marca NF-e como RECEBIDA
- * 5. Atualiza quantidadeRecebida nos PedidoCompraItens vinculados
- * 6. Atualiza status do(s) pedido(s) vinculado(s)
- * 7. Registra auditoria
+ * Confirma o recebimento em transação atômica:
+ * 1. Cria Recebimento + RecebimentoItem
+ * 2. ENTRADA_NFE no MovimentoEstoque
+ * 3. Atualiza estoqueAtual
+ * 4. Atualiza precoCompra (último custo) e custoMedio (médio ponderado) — separados
+ * 5. Marca NF-e como RECEBIDA
+ * 6. Atualiza quantidadeRecebida nos PedidoCompraItems
+ * 7. Atualiza status dos pedidos vinculados
+ * 8. Registra auditoria + evento
  *
+ * Guard de idempotência: rejeita com 409 se NF-e já está RECEBIDA.
  * ROLLBACK automático em qualquer falha.
  */
-export async function confirmarRecebimento(
-  params: ConfirmarRecebimentoParams
-) {
+export async function confirmarRecebimento(params: ConfirmarRecebimentoParams) {
   const { notaFiscalId, usuarioId, itens, observacao } = params;
 
-  if (itens.length === 0) {
-    throw new AppError('Nenhum item informado para recebimento', 400);
-  }
+  if (itens.length === 0) throw new AppError('Nenhum item informado para recebimento', 400);
 
-  // Guard de idempotência — fora da transação para dar erro antes de abri-la
+  // Idempotência — fora da transação
   const nf = await (prisma as any).notaFiscalEntrada.findUnique({
-    where: { id: notaFiscalId },
-    include: { pedidos: { include: { itens: true } } },
+    where:   { id: notaFiscalId },
+    include: {
+      nfePedidos: { include: { pedido: { include: { itens: true } } } },
+    },
   });
   if (!nf) throw new AppError('Nota Fiscal não encontrada', 404);
+
   if (nf.status === 'RECEBIDA') {
-    throw new AppError('Esta NF-e já foi recebida. Operação bloqueada para evitar duplicidade.', 409);
+    // Buscar dados do recebimento original para mensagem clara
+    const recAnterior = await (prisma as any).recebimento.findFirst({
+      where:   { notaFiscalId, status: 'CONCLUIDO' },
+      include: { usuario: { select: { nome: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    throw new AppError(
+      `NF-e já recebida em ${recAnterior?.dataRecebimento?.toLocaleString('pt-BR') ?? '?'} ` +
+      `por ${recAnterior?.usuario?.nome ?? 'usuário desconhecido'}. ` +
+      `Operação bloqueada para evitar duplicidade.`,
+      409
+    );
   }
+
+  if (nf.situacaoFiscal === 'DENEGADA') {
+    throw new AppError(
+      'Esta NF-e foi denegada pela SEFAZ e não pode ser recebida.',
+      422
+    );
+  }
+
+  const pedidos = (nf.nfePedidos ?? []).map((np: any) => np.pedido);
 
   // ── Transação atômica ─────────────────────────────────────────────────────
   const recebimento = await prisma.$transaction(async (tx: any) => {
-    // 1. Criar Recebimento
     const rec = await tx.recebimento.create({
       data: {
         notaFiscalId,
         usuarioId,
-        status:         'CONCLUIDO',
+        status:          'CONCLUIDO',
         dataRecebimento: new Date(),
         observacao,
       },
     });
 
-    // 2. Processar cada item
     for (const item of itens) {
-      // Buscar produto com lock implícito via update
       const produto = await tx.produto.findUnique({
-        where: { id: item.produtoId },
-        select: { id: true, nome: true, estoqueAtual: true, precoCompra: true },
+        where:  { id: item.produtoId },
+        select: { id: true, estoqueAtual: true, precoCompra: true, custoMedio: true },
       });
-      if (!produto) {
-        throw new AppError(`Produto ${item.produtoId} não encontrado`, 404);
-      }
+      if (!produto) throw new AppError(`Produto ${item.produtoId} não encontrado`, 404);
 
-      const saldoAntes   = produto.estoqueAtual;
-      const saldoDepois  = saldoAntes + item.quantidade;
-      const novoPreco    = calcularPrecoMedio(
-        saldoAntes,
-        Number(produto.precoCompra),
-        item.quantidade,
-        item.valorUnitario
-      );
+      const saldoAntes  = produto.estoqueAtual;
+      const saldoDepois = saldoAntes + item.quantidade;
 
-      // 2a. RecebimentoItem
+      // Custo médio usa o custoMedio atual (ou precoCompra se custoMedio ainda não existe)
+      const custoAtual   = Number(produto.custoMedio ?? produto.precoCompra ?? 0);
+      const novoCustoMedio = calcularCustoMedio(saldoAntes, custoAtual, item.quantidade, item.valorUnitario);
+
       await tx.recebimentoItem.create({
         data: {
           recebimentoId: rec.id,
@@ -109,7 +123,6 @@ export async function confirmarRecebimento(
         },
       });
 
-      // 2b. MovimentoEstoque ENTRADA_NFE
       await tx.movimentoEstoque.create({
         data: {
           produtoId:  item.produtoId,
@@ -118,44 +131,40 @@ export async function confirmarRecebimento(
           saldoAntes,
           saldoDepois,
           referencia: notaFiscalId,
-          motivo:     `Recebimento NF-e #${nf.numero} — ${nf.serie}`,
+          motivo:     `Recebimento NF-e ${nf.numero}-${nf.serie}`,
         },
       });
 
-      // 2c. Atualizar estoque e preço médio
       await tx.produto.update({
         where: { id: item.produtoId },
         data: {
           estoqueAtual: saldoDepois,
-          precoCompra:  novoPreco,
-          // Atualiza fornecedor principal do produto se NF-e tem fornecedor
+          precoCompra:  item.valorUnitario, // último custo desta NF-e
+          custoMedio:   novoCustoMedio,     // médio ponderado
           ...(nf.fornecedorId ? { fornecedorId: nf.fornecedorId } : {}),
         },
       });
 
-      // 2d. Atualizar quantidadeRecebida no(s) PedidoCompraItem vinculado(s)
-      for (const pedido of nf.pedidos) {
-        const pedidoItem = pedido.itens.find(
-          (pi: any) => pi.produtoId === item.produtoId
-        );
-        if (pedidoItem) {
+      // Atualizar quantidadeRecebida nos pedidos vinculados
+      for (const pedido of pedidos) {
+        const pi = pedido.itens.find((p: any) => p.produtoId === item.produtoId);
+        if (pi) {
           await tx.pedidoCompraItem.update({
-            where: { id: pedidoItem.id },
+            where: { id: pi.id },
             data:  { quantidadeRecebida: { increment: item.quantidade } },
           });
         }
       }
     }
 
-    // 3. Marcar NF-e como RECEBIDA
+    // Marcar NF-e como RECEBIDA
     await tx.notaFiscalEntrada.update({
       where: { id: notaFiscalId },
       data:  { status: 'RECEBIDA' },
     });
 
-    // 4. Atualizar status dos pedidos vinculados
-    for (const pedido of nf.pedidos) {
-      // Recarregar itens atualizados dentro da transação
+    // Atualizar status dos pedidos
+    for (const pedido of pedidos) {
       const pedidoAtualizado = await tx.pedidoCompra.findUnique({
         where:   { id: pedido.id },
         include: { itens: true },
@@ -168,69 +177,50 @@ export async function confirmarRecebimento(
       const algumRecebido = pedidoAtualizado.itens.some(
         (pi: any) => pi.quantidadeRecebida > 0
       );
-
-      const novoStatus = todosConcluidos
-        ? 'RECEBIDO'
-        : algumRecebido
-        ? 'PARCIAL'
-        : pedidoAtualizado.status;
-
-      if (novoStatus !== pedidoAtualizado.status) {
-        await tx.pedidoCompra.update({
-          where: { id: pedido.id },
-          data:  { status: novoStatus },
-        });
+      const novoStatus = todosConcluidos ? 'RECEBIDO' : algumRecebido ? 'PARCIAL' : null;
+      if (novoStatus && novoStatus !== pedidoAtualizado.status) {
+        await tx.pedidoCompra.update({ where: { id: pedido.id }, data: { status: novoStatus } });
       }
     }
 
     return rec;
   });
 
-  // 5. Auditoria fora da transação
+  // Auditoria + evento (fora da transação — falha silenciosa nos eventos)
   await registrarAuditoria({
     usuarioId,
     acao:       'CONFIRMAR_RECEBIMENTO',
     tabela:     'recebimentos',
     registroId: recebimento.id,
-    dadosDepois: {
-      notaFiscalId,
-      totalItens: itens.length,
-      observacao,
-    },
+    dadosDepois: { notaFiscalId, totalItens: itens.length, observacao },
+  });
+
+  registrarEventoNfe({
+    nfeId:     notaFiscalId,
+    tipo:      'RECEBIMENTO_CONFIRMADO',
+    descricao: `Recebimento confirmado: ${itens.length} item(s) — estoque atualizado`,
+    usuarioId,
+    dados:     { recebimentoId: recebimento.id, totalItens: itens.length },
   });
 
   return recebimento;
 }
 
-// ── Estorno ───────────────────────────────────────────────────────────────────
+// ── Estornar recebimento ──────────────────────────────────────────────────────
 
-/**
- * Estorna um recebimento já confirmado (apenas ADMINISTRADOR).
- * Gera movimentos SAIDA_ESTORNO_NFE e reverte estoqueAtual.
- * Preserva todo o histórico original — nunca deleta registros.
- */
-export async function estornarRecebimento(
-  recebimentoId: string,
-  usuarioId: string
-) {
-  const recebimento = await (prisma as any).recebimento.findUnique({
+export async function estornarRecebimento(recebimentoId: string, usuarioId: string) {
+  const rec = await (prisma as any).recebimento.findUnique({
     where:   { id: recebimentoId },
-    include: {
-      itens:     { include: { produto: true } },
-      notaFiscal: true,
-    },
+    include: { itens: { include: { produto: true } }, notaFiscal: true },
   });
-  if (!recebimento) throw new AppError('Recebimento não encontrado', 404);
-  if (recebimento.status === 'CANCELADO') {
-    throw new AppError('Recebimento já foi estornado', 409);
-  }
+  if (!rec) throw new AppError('Recebimento não encontrado', 404);
+  if (rec.status === 'CANCELADO') throw new AppError('Recebimento já foi estornado', 409);
 
   await prisma.$transaction(async (tx: any) => {
-    // Reverter estoque de cada item
-    for (const item of recebimento.itens) {
+    for (const item of rec.itens) {
       const produto = await tx.produto.findUnique({
         where:  { id: item.produtoId },
-        select: { estoqueAtual: true, precoCompra: true },
+        select: { estoqueAtual: true },
       });
       if (!produto) continue;
 
@@ -244,28 +234,16 @@ export async function estornarRecebimento(
           quantidade: item.quantidade,
           saldoAntes,
           saldoDepois,
-          referencia: recebimento.notaFiscalId,
-          motivo:     `Estorno recebimento NF-e #${recebimento.notaFiscal.numero}`,
+          referencia: rec.notaFiscalId,
+          motivo:     `Estorno NF-e ${rec.notaFiscal.numero}-${rec.notaFiscal.serie}`,
         },
       });
 
-      await tx.produto.update({
-        where: { id: item.produtoId },
-        data:  { estoqueAtual: saldoDepois },
-      });
+      await tx.produto.update({ where: { id: item.produtoId }, data: { estoqueAtual: saldoDepois } });
     }
 
-    // Marcar recebimento como cancelado
-    await tx.recebimento.update({
-      where: { id: recebimentoId },
-      data:  { status: 'CANCELADO' },
-    });
-
-    // Voltar NF-e para IMPORTADA
-    await tx.notaFiscalEntrada.update({
-      where: { id: recebimento.notaFiscalId },
-      data:  { status: 'IMPORTADA' },
-    });
+    await tx.recebimento.update({ where: { id: recebimentoId }, data: { status: 'CANCELADO' } });
+    await tx.notaFiscalEntrada.update({ where: { id: rec.notaFiscalId }, data: { status: 'IMPORTADA' } });
   });
 
   await registrarAuditoria({
@@ -273,7 +251,15 @@ export async function estornarRecebimento(
     acao:       'ESTORNAR_RECEBIMENTO',
     tabela:     'recebimentos',
     registroId: recebimentoId,
-    dadosAntes: { status: 'CONCLUIDO' },
+    dadosAntes:  { status: 'CONCLUIDO' },
     dadosDepois: { status: 'CANCELADO' },
+  });
+
+  registrarEventoNfe({
+    nfeId:     rec.notaFiscalId,
+    tipo:      'RECEBIMENTO_ESTORNADO',
+    descricao: `Recebimento estornado — estoque revertido`,
+    usuarioId,
+    dados:     { recebimentoId },
   });
 }

@@ -87,6 +87,11 @@ export default function PedidosCompraPage() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['pedidos'] }); toast.success('Pedido enviado ao fornecedor'); setModalDetalhe(null); },
   });
 
+  const faturar = useMutation({
+    mutationFn: (id: string) => pedidosService.faturar(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['pedidos'] }); toast.success('Pedido marcado como faturado'); setModalDetalhe(null); },
+  });
+
   const cancelar = useMutation({
     mutationFn: (id: string) => pedidosService.cancelar(id),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['pedidos'] }); toast.success('Pedido cancelado'); setModalDetalhe(null); },
@@ -316,6 +321,12 @@ export default function PedidosCompraPage() {
                 {modalDetalhe.status === 'ABERTO' && (
                   <button onClick={() => enviar.mutate(modalDetalhe.id)} disabled={enviar.isPending} className="btn-primary">
                     <span className="material-symbols-outlined text-[16px]">send</span> Enviar ao Fornecedor
+                  </button>
+                )}
+                {modalDetalhe.status === 'ENVIADO' && (
+                  <button onClick={() => faturar.mutate(modalDetalhe.id)} disabled={faturar.isPending}
+                    className="bg-purple-600 hover:bg-purple-700 text-white flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-semibold transition">
+                    <span className="material-symbols-outlined text-[16px]">receipt_long</span> Marcar como Faturado
                   </button>
                 )}
                 {/* Próximo passo: importar NF-e quando pedido foi enviado/faturado */}

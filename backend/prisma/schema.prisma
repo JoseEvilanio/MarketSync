@@ -30,9 +30,11 @@ model Usuario {
   caixas     Caixa[]
   movimentosCaixa MovimentoCaixa[]
   auditorias Auditoria[]
-  pedidosCompra        PedidoCompra[]
-  recebimentos         Recebimento[]
-  divergenciasResolvidas Divergencia[] @relation("DivergenciaResolvidaPor")
+  pedidosCompra          PedidoCompra[]
+  recebimentos           Recebimento[]
+  divergenciasResolvidas Divergencia[]  @relation("DivergenciaResolvidaPor")
+  nfePedidos             NfePedido[]    @relation("NfePedidoVinculadoPor")
+  eventosNfe             EventoNfe[]
 
   @@map("usuarios")
 }
@@ -107,6 +109,7 @@ model Produto {
   modoPesagem     ModoPesagem @default(MANUAL)
   peso            Float?
   precoCompra     Decimal     @db.Decimal(10, 2) @default(0)
+  custoMedio      Decimal?    @db.Decimal(10, 2)
   precoVenda      Decimal     @db.Decimal(10, 2)
   margemLucro     Float?
   estoqueAtual    Float       @default(0)
@@ -356,12 +359,51 @@ enum TipoDivergencia {
   PRECO_DIFERENTE
   PRODUTO_NAO_SOLICITADO
   PRODUTO_NAO_IDENTIFICADO
+  PRODUTO_FALTANTE
 }
 
 enum StatusDivergencia {
   PENDENTE
   RESOLVIDA
   IGNORADA
+}
+
+// ─────────────── NF-e: ENUMS FISCAIS ───────────────
+
+enum SituacaoFiscalNfe {
+  AUTORIZADA
+  CANCELADA
+  DENEGADA
+  DESCONHECIDA
+}
+
+enum StatusIdentificacaoItem {
+  IDENTIFICADO_EAN
+  IDENTIFICADO_CODIGO_FORNECEDOR
+  IDENTIFICADO_MANUAL
+  NAO_IDENTIFICADO
+}
+
+enum TipoEventoNfe {
+  // Eventos internos — criados automaticamente pelo sistema
+  NFE_IMPORTADA
+  FORNECEDOR_IDENTIFICADO
+  FORNECEDOR_NAO_ENCONTRADO
+  PRODUTO_IDENTIFICADO
+  PEDIDO_VINCULADO
+  CONFERENCIA_INICIADA
+  DIVERGENCIA_DETECTADA
+  DIVERGENCIA_AUTORIZADA
+  RECEBIMENTO_CONFIRMADO
+  RECEBIMENTO_ESTORNADO
+  NFE_CANCELADA
+  // Eventos externos — estrutura preparada para futura integração SEFAZ
+  CIENCIA_OPERACAO
+  CONFIRMACAO_OPERACAO
+  DESCONHECIMENTO_OPERACAO
+  OPERACAO_NAO_REALIZADA
+  CANCELAMENTO_SEFAZ
+  CARTA_CORRECAO
 }
 
 model Compra {
@@ -480,6 +522,7 @@ model PedidoCompra {
   usuario      Usuario            @relation(fields: [usuarioId], references: [id])
   itens        PedidoCompraItem[]
   notasFiscais NotaFiscalEntrada[] @relation("PedidoNotasFiscais")
+  nfePedidos   NfePedido[]
 
   @@map("pedidos_compra")
 }
@@ -504,48 +547,65 @@ model PedidoCompraItem {
 // ─────────────── NOTAS FISCAIS DE ENTRADA ───────────────
 
 model NotaFiscalEntrada {
-  id            String           @id @default(uuid())
-  fornecedorId  String?
-  chaveAcesso   String           @unique
-  numero        String
-  serie         String
-  dataEmissao   DateTime
-  dataEntrada   DateTime?
-  valorTotal    Decimal          @db.Decimal(10, 2)
-  status        StatusNotaFiscal @default(IMPORTADA)
-  xmlPath       String?
-  observacao    String?
-  cnpjEmitente  String?
-  nomeEmitente  String?
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
-  deletedAt     DateTime?
+  id                String           @id @default(uuid())
+  fornecedorId      String?
+  chaveAcesso       String           @unique
+  numero            String
+  serie             String
+  modelo            String?
+  dataEmissao       DateTime
+  dataEntrada       DateTime?
+  dataAutorizacao   DateTime?
+  protocolo         String?
+  valorTotal        Decimal          @db.Decimal(10, 2)
+  status            StatusNotaFiscal @default(IMPORTADA)
+  situacaoFiscal    SituacaoFiscalNfe @default(DESCONHECIDA)
+  xmlPath           String?
+  xmlHash           String?
+  observacao        String?
+  cnpjEmitente      String?
+  nomeEmitente      String?
+  destinatarioCnpj  String?
+  destinatarioNome  String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  deletedAt         DateTime?
 
   fornecedor    Fornecedor?      @relation(fields: [fornecedorId], references: [id])
   itens         NotaFiscalItem[]
   recebimentos  Recebimento[]
   pedidos       PedidoCompra[]   @relation("PedidoNotasFiscais")
+  nfePedidos    NfePedido[]
   divergencias  Divergencia[]
+  eventos       EventoNfe[]
 
   @@map("notas_fiscais_entrada")
 }
 
 model NotaFiscalItem {
-  id               String            @id @default(uuid())
-  notaFiscalId     String
-  produtoId        String?
-  codigoFornecedor String
-  gtin             String?
-  descricao        String
-  ncm              String?
-  cfop             String?
-  unidade          String            @default("UN")
-  quantidade       Float
-  valorUnitario    Decimal           @db.Decimal(10, 2)
-  desconto         Decimal           @db.Decimal(10, 2) @default(0)
-  valorTotal       Decimal           @db.Decimal(10, 2)
-  identificado     Boolean           @default(false)
-  createdAt        DateTime          @default(now())
+  id                  String                  @id @default(uuid())
+  notaFiscalId        String
+  produtoId           String?
+  codigoFornecedor    String
+  gtin                String?
+  descricao           String
+  ncm                 String?
+  cfop                String?
+  unidade             String                  @default("UN")
+  quantidade          Float
+  valorUnitario       Decimal                 @db.Decimal(10, 2)
+  desconto            Decimal                 @db.Decimal(10, 2) @default(0)
+  valorTotal          Decimal                 @db.Decimal(10, 2)
+  identificado        Boolean                 @default(false)
+  statusIdentificacao StatusIdentificacaoItem @default(NAO_IDENTIFICADO)
+  cest                String?
+  csosn               String?
+  cst                 String?
+  valorIcms           Decimal?                @db.Decimal(10, 2)
+  valorIpi            Decimal?                @db.Decimal(10, 2)
+  valorPis            Decimal?                @db.Decimal(10, 2)
+  valorCofins         Decimal?                @db.Decimal(10, 2)
+  createdAt           DateTime                @default(now())
 
   notaFiscal       NotaFiscalEntrada @relation(fields: [notaFiscalId], references: [id])
   produto          Produto?          @relation(fields: [produtoId], references: [id])
@@ -632,6 +692,41 @@ model Divergencia {
   resolvidoPor       Usuario?          @relation("DivergenciaResolvidaPor", fields: [resolvidoPorId], references: [id])
 
   @@map("divergencias")
+}
+
+// ─────────────── NF-e × PEDIDO (tabela explícita) ───────────────
+
+model NfePedido {
+  id             String            @id @default(uuid())
+  nfeId          String
+  pedidoId       String
+  vinculadoPorId String?
+  dataVinculacao DateTime          @default(now())
+  observacao     String?
+
+  nfe            NotaFiscalEntrada @relation(fields: [nfeId], references: [id])
+  pedido         PedidoCompra      @relation(fields: [pedidoId], references: [id])
+  vinculadoPor   Usuario?          @relation("NfePedidoVinculadoPor", fields: [vinculadoPorId], references: [id])
+
+  @@unique([nfeId, pedidoId])
+  @@map("nfe_pedidos")
+}
+
+// ─────────────── EVENTOS DA NF-e ───────────────
+
+model EventoNfe {
+  id        String        @id @default(uuid())
+  nfeId     String
+  tipo      TipoEventoNfe
+  descricao String
+  usuarioId String?
+  dados     Json?
+  createdAt DateTime      @default(now())
+
+  nfe       NotaFiscalEntrada @relation(fields: [nfeId], references: [id])
+  usuario   Usuario?          @relation(fields: [usuarioId], references: [id])
+
+  @@map("eventos_nfe")
 }
 
 // ─────────────── CONFIGURAÇÕES ───────────────

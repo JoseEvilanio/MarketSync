@@ -222,6 +222,26 @@ export async function cancelar(req: AuthRequest, res: Response): Promise<void> {
   res.json({ mensagem: 'Pedido cancelado' });
 }
 
+export async function faturar(req: AuthRequest, res: Response): Promise<void> {
+  const pedido = await (prisma as any).pedidoCompra.findFirst({
+    where: { id: req.params.id, status: 'ENVIADO', deletedAt: null },
+  });
+  if (!pedido) throw new AppError('Pedido não encontrado ou não está no status ENVIADO', 404);
+
+  const atualizado = await (prisma as any).pedidoCompra.update({
+    where: { id: req.params.id },
+    data:  { status: 'FATURADO' },
+  });
+
+  await registrarAuditoria({
+    usuarioId: req.usuario!.id, acao: 'FATURAR_PEDIDO_COMPRA',
+    tabela: 'pedidos_compra', registroId: pedido.id,
+    dadosAntes: { status: 'ENVIADO' }, dadosDepois: { status: 'FATURADO' },
+  });
+
+  res.json(atualizado);
+}
+
 export async function dashboard(_req: AuthRequest, res: Response): Promise<void> {
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);

@@ -15,3 +15,6 @@ backend/config/config.json
 installer/cache/
 installer/staging/
 installer/*.exe
+
+# XMLs de NF-e — documentos fiscais reais nunca vão para o repositório
+backend/storage/notas-fiscais/**/*.xml
