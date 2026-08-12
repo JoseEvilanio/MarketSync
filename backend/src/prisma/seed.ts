@@ -48,7 +48,7 @@ async function main() {
   const categorias = [
     'Bebidas', 'Laticínios', 'Padaria', 'Hortifrúti', 'Carnes',
     'Frios e Embutidos', 'Higiene Pessoal', 'Limpeza', 'Mercearia',
-    'Snacks e Biscoitos', 'Congelados', 'Cereais', 'Bebidas Alcoólicas',
+    'Snacks e Biscoitos', 'Congelados', 'Cereais', 'Bebidas Alcoólicas', 'Utencílios'
   ];
 
   for (const nome of categorias) {
