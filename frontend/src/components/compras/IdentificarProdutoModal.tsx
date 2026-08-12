@@ -5,10 +5,13 @@ import Modal from '@/components/ui/Modal';
 import { notasFiscaisService, produtosService } from '@/services/api';
 
 interface ItemNFe {
-  id: string;
+  // Aceita tanto o formato da ConferenciaTable (nfeItemId) quanto o antigo (id)
+  id?:              string;
+  nfeItemId?:       string | null;
   codigoFornecedor: string;
-  gtin: string | null;
-  descricao: string;
+  gtin?:            string | null;
+  descricao?:       string;
+  descricaoNfe?:    string;
 }
 
 interface Props {
@@ -40,11 +43,16 @@ export default function IdentificarProdutoModal({ open, onClose, notaFiscalId, i
   }
 
   const { mutate: associar, isPending } = useMutation({
-    mutationFn: () => notasFiscaisService.identificarProduto(notaFiscalId, {
-      notaFiscalItemId:    item!.id,
-      produtoId:           selecionado!.id,
-      salvarRelacionamento: salvar,
-    }),
+    mutationFn: () => {
+      // O item pode vir da ConferenciaTable (campo nfeItemId) ou do formato legado (campo id)
+      const itemId = item!.nfeItemId ?? item!.id;
+      if (!itemId) throw new Error('ID do item da NF-e não encontrado');
+      return notasFiscaisService.identificarProduto(notaFiscalId, {
+        notaFiscalItemId:    itemId,
+        produtoId:           selecionado!.id,
+        salvarRelacionamento: salvar,
+      });
+    },
     onSuccess: () => {
       toast.success('Produto associado com sucesso!');
       setBusca(''); setProdutos([]); setSelecionado(null);
@@ -67,7 +75,9 @@ export default function IdentificarProdutoModal({ open, onClose, notaFiscalId, i
         {item && (
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1">
             <p className="text-xs font-bold text-amber-700 uppercase">Item da NF-e não identificado</p>
-            <p className="text-sm font-semibold text-on-surface">{item.descricao}</p>
+            <p className="text-sm font-semibold text-on-surface">
+              {item.descricao ?? item.descricaoNfe ?? '—'}
+            </p>
             <div className="flex gap-4 text-xs text-on-surface-variant">
               <span>Cód. Fornecedor: <strong>{item.codigoFornecedor}</strong></span>
               {item.gtin && <span>GTIN/EAN: <strong>{item.gtin}</strong></span>}
