@@ -2,7 +2,7 @@ import { useState } from 'react';
 import toast from 'react-hot-toast';
 
 interface Props {
-  chave: string;
+  chave?: string;
   /** Se true, exibe como campo de busca editável */
   editavel?: boolean;
   onBuscar?: (chave: string) => void;
@@ -30,7 +30,7 @@ export default function NfeChaveField({ chave, editavel = false, onBuscar, onCha
   const [valor, setValor] = useState('');
 
   function handleCopiar() {
-    const texto = chave.replace(/\D/g, '');
+    const texto = (chave ?? '').replace(/\D/g, '');
     navigator.clipboard.writeText(texto).then(
       () => toast.success('Chave copiada!'),
       () => toast.error('Falha ao copiar')
@@ -39,7 +39,7 @@ export default function NfeChaveField({ chave, editavel = false, onBuscar, onCha
 
   if (!editavel) {
     // Modo exibição
-    const valida = validarChave(chave);
+    const valida = validarChave(chave ?? '');
     return (
       <div className="flex items-center gap-2">
         <span className={`font-mono text-xs break-all ${valida ? 'text-on-surface' : 'text-error'}`}>

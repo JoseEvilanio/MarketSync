@@ -5,12 +5,13 @@ import { formatCurrency, formatDateTime } from '@/utils/format';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import ResolverDivergenciaModal from '@/components/compras/ResolverDivergenciaModal';
 
-const TIPO_CFG: Record<string, { label: string; cls: string; icon: string }> = {
-  QUANTIDADE_MENOR:         { label: 'Qtd menor',          cls: 'bg-amber-100 text-amber-700',  icon: 'arrow_downward'  },
-  QUANTIDADE_MAIOR:         { label: 'Qtd maior',          cls: 'bg-orange-100 text-orange-700', icon: 'arrow_upward'   },
-  PRECO_DIFERENTE:          { label: 'Preço diferente',    cls: 'bg-blue-100 text-blue-700',     icon: 'price_change'   },
-  PRODUTO_NAO_SOLICITADO:   { label: 'Não solicitado',     cls: 'bg-purple-100 text-purple-700', icon: 'help'           },
-  PRODUTO_NAO_IDENTIFICADO: { label: 'Não identificado',   cls: 'bg-red-100 text-red-700',       icon: 'error'          },
+const TIPO_CFG: Record<string, { label: string; cls: string; icon: string; classificacao: 'BLOQUEANTE' | 'ALERTA' }> = {
+  QUANTIDADE_MENOR:         { label: 'Qtd menor',          cls: 'bg-amber-100 text-amber-700',  icon: 'arrow_downward',         classificacao: 'ALERTA'     },
+  QUANTIDADE_MAIOR:         { label: 'Qtd maior',          cls: 'bg-orange-100 text-orange-700', icon: 'arrow_upward',           classificacao: 'ALERTA'     },
+  PRECO_DIFERENTE:          { label: 'Preço diferente',    cls: 'bg-blue-100 text-blue-700',     icon: 'price_change',           classificacao: 'ALERTA'     },
+  PRODUTO_NAO_SOLICITADO:   { label: 'Não solicitado',     cls: 'bg-purple-100 text-purple-700', icon: 'help',                   classificacao: 'ALERTA'     },
+  PRODUTO_NAO_IDENTIFICADO: { label: 'Não identificado',   cls: 'bg-red-100 text-red-700',       icon: 'error',                  classificacao: 'BLOQUEANTE' },
+  PRODUTO_FALTANTE:         { label: 'Faltante na NF-e',   cls: 'bg-amber-100 text-amber-700',   icon: 'remove_shopping_cart',   classificacao: 'ALERTA'     },
 };
 
 const STATUS_CFG: Record<string, { label: string; cls: string }> = {
@@ -84,6 +85,11 @@ export default function DivergenciasPage() {
                         <span className="material-symbols-outlined text-[12px]">{tipo.icon}</span>
                         {tipo.label}
                       </span>
+                      <p className={`text-[10px] mt-0.5 font-semibold ${
+                        tipo.classificacao === 'BLOQUEANTE' ? 'text-red-600' : 'text-amber-600'
+                      }`}>
+                        {tipo.classificacao === 'BLOQUEANTE' ? '⛔ Bloqueante' : '⚠ Alerta'}
+                      </p>
                     </td>
                     <td className="td text-right text-data-mono">{d.quantidadePedida ?? '—'}</td>
                     <td className="td text-right text-data-mono">{d.quantidadeNfe ?? '—'}</td>
