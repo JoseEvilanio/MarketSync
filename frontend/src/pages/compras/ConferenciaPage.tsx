@@ -27,13 +27,14 @@ const SITUACAO_CFG: Record<string, { label: string; cls: string }> = {
 
 export default function ConferenciaPage({ notaFiscalId, onVoltar }: Props) {
   const qc = useQueryClient();
-  const [aba, setAba]                     = useState<Aba>('conferencia');
+  const [aba, setAba]                         = useState<Aba>('conferencia');
   const [itemIdentificar, setItemIdentificar] = useState<any>(null);
-  const [modalVincular, setModalVincular]   = useState(false);
+  const [modalVincular, setModalVincular]     = useState(false);
   const [divergenciaResolver, setDivergenciaResolver] = useState<any>(null);
-  const [qtdsEditadas, setQtdsEditadas]     = useState<Record<string, number>>({});
-  const [confirmando, setConfirmando]       = useState(false);
-  const [observacao, setObservacao]         = useState('');
+  const [qtdsEditadas, setQtdsEditadas]         = useState<Record<string, number>>({});
+  const [confirmando, setConfirmando]           = useState(false);
+  const [observacao, setObservacao]             = useState('');
+  const [filtroStatus, setFiltroStatus]         = useState<'TODOS' | 'IDENTIFICADOS' | 'ALERTAS' | 'BLOQUEANTES'>('TODOS');
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['conferencia', notaFiscalId],
@@ -85,7 +86,18 @@ export default function ConferenciaPage({ notaFiscalId, onVoltar }: Props) {
   const jaRecebida    = conf.notaFiscal.status === 'RECEBIDA';
   const podeConfirmar = !jaRecebida && conf.podeConfirmar;
 
-  const situacao      = SITUACAO_CFG[conf.notaFiscal.situacaoFiscal ?? 'DESCONHECIDA'] ?? SITUACAO_CFG.DESCONHECIDA;
+  const totalItensCount    = itensParaTabela.length;
+  const identificadosCount = conf.identificados ?? 0;
+  const pctProgresso        = totalItensCount > 0 ? Math.round((identificadosCount / totalItensCount) * 100) : 0;
+
+  const itensExibidos = itensParaTabela.filter((item) => {
+    if (filtroStatus === 'IDENTIFICADOS') return item.identificado;
+    if (filtroStatus === 'ALERTAS') return item.classificacao === 'ALERTA';
+    if (filtroStatus === 'BLOQUEANTES') return item.classificacao === 'BLOQUEANTE';
+    return true;
+  });
+
+  const situacao = SITUACAO_CFG[conf.notaFiscal.situacaoFiscal ?? 'DESCONHECIDA'] ?? SITUACAO_CFG.DESCONHECIDA;
 
   return (
     <div className="space-y-4">
@@ -183,30 +195,112 @@ export default function ConferenciaPage({ notaFiscalId, onVoltar }: Props) {
       {/* ── Aba Conferência ── */}
       {aba === 'conferencia' && (
         <>
-          {/* Contadores */}
-          <div className="grid grid-cols-3 gap-3">
-            <div className="card p-3 flex items-center gap-3">
-              <span className="material-symbols-outlined text-green-600 text-[24px]">check_circle</span>
+          {/* Indicador de Progresso e Etapas (Seção 19) */}
+          <div className="card p-4 space-y-3 bg-surface-container-low border border-outline-variant">
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <div>
-                <p className="text-2xl font-bold text-on-surface">{conf.identificados ?? 0}</p>
-                <p className="text-xs text-on-surface-variant">Identificado(s)</p>
+                <h3 className="text-sm font-bold text-on-surface">Progresso da Conferência</h3>
+                <p className="text-xs text-on-surface-variant">
+                  {identificadosCount} de {totalItensCount} produto(s) identificado(s) ({pctProgresso}%)
+                </p>
+              </div>
+              <div className="flex items-center gap-4 text-xs font-semibold">
+                <div className="flex items-center gap-1.5">
+                  <span className={`w-2.5 h-2.5 rounded-full ${identificadosCount === totalItensCount ? 'bg-green-500' : 'bg-amber-500'}`} />
+                  <span>Identificação: <strong>{identificadosCount}/{totalItensCount}</strong></span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className={`w-2.5 h-2.5 rounded-full ${conf.divergenciasBloqueantes > 0 ? 'bg-red-500' : conf.divergenciasAlerta > 0 ? 'bg-amber-500' : 'bg-green-500'}`} />
+                  <span>Divergências: <strong>{conf.divergenciasBloqueantes + conf.divergenciasAlerta}</strong></span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className={`w-2.5 h-2.5 rounded-full ${jaRecebida ? 'bg-green-500' : 'bg-gray-400'}`} />
+                  <span>Recebimento: <strong>{jaRecebida ? 'Concluído' : 'Pendente'}</strong></span>
+                </div>
               </div>
             </div>
-            <div className={`card p-3 flex items-center gap-3 ${conf.divergenciasAlerta > 0 ? 'border-amber-200 bg-amber-50/30' : ''}`}>
-              <span className="material-symbols-outlined text-amber-600 text-[24px]">warning</span>
-              <div>
-                <p className="text-2xl font-bold text-on-surface">{conf.divergenciasAlerta ?? 0}</p>
-                <p className="text-xs text-on-surface-variant">Alerta(s)</p>
-              </div>
-            </div>
-            <div className={`card p-3 flex items-center gap-3 ${conf.divergenciasBloqueantes > 0 ? 'border-red-200 bg-red-50/30' : ''}`}>
-              <span className="material-symbols-outlined text-red-600 text-[24px]">block</span>
-              <div>
-                <p className="text-2xl font-bold text-on-surface">{conf.divergenciasBloqueantes ?? 0}</p>
-                <p className="text-xs text-on-surface-variant">Bloqueante(s)</p>
-              </div>
+
+            {/* Barra de progresso */}
+            <div className="w-full bg-outline-variant/40 rounded-full h-2 overflow-hidden">
+              <div
+                className={`h-full transition-all duration-500 ${
+                  pctProgresso === 100 ? 'bg-green-600' : 'bg-primary'
+                }`}
+                style={{ width: `${pctProgresso}%` }}
+              />
             </div>
           </div>
+
+          {/* Contadores Clicáveis / Filtros (Seção 18) */}
+          <div className="grid grid-cols-3 gap-3">
+            <button
+              type="button"
+              onClick={() => setFiltroStatus(filtroStatus === 'IDENTIFICADOS' ? 'TODOS' : 'IDENTIFICADOS')}
+              className={`card p-3 flex items-center gap-3 text-left transition ${
+                filtroStatus === 'IDENTIFICADOS'
+                  ? 'ring-2 ring-green-600 bg-green-50/50'
+                  : 'hover:bg-surface-container-low'
+              }`}
+            >
+              <span className="material-symbols-outlined text-green-600 text-[26px]">check_circle</span>
+              <div>
+                <p className="text-2xl font-bold text-on-surface">{conf.identificados ?? 0}</p>
+                <p className="text-xs font-medium text-on-surface-variant">Identificado(s)</p>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setFiltroStatus(filtroStatus === 'ALERTAS' ? 'TODOS' : 'ALERTAS')}
+              className={`card p-3 flex items-center gap-3 text-left transition ${
+                filtroStatus === 'ALERTAS'
+                  ? 'ring-2 ring-amber-600 bg-amber-50'
+                  : conf.divergenciasAlerta > 0
+                  ? 'border-amber-200 bg-amber-50/30 hover:bg-amber-50/60'
+                  : 'hover:bg-surface-container-low'
+              }`}
+            >
+              <span className="material-symbols-outlined text-amber-600 text-[26px]">warning</span>
+              <div>
+                <p className="text-2xl font-bold text-on-surface">{conf.divergenciasAlerta ?? 0}</p>
+                <p className="text-xs font-medium text-on-surface-variant">Alerta(s)</p>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setFiltroStatus(filtroStatus === 'BLOQUEANTES' ? 'TODOS' : 'BLOQUEANTES')}
+              className={`card p-3 flex items-center gap-3 text-left transition ${
+                filtroStatus === 'BLOQUEANTES'
+                  ? 'ring-2 ring-red-600 bg-red-50'
+                  : conf.divergenciasBloqueantes > 0
+                  ? 'border-red-200 bg-red-50/30 hover:bg-red-50/60'
+                  : 'hover:bg-surface-container-low'
+              }`}
+            >
+              <span className="material-symbols-outlined text-red-600 text-[26px]">block</span>
+              <div>
+                <p className="text-2xl font-bold text-on-surface">{conf.divergenciasBloqueantes ?? 0}</p>
+                <p className="text-xs font-medium text-on-surface-variant">Bloqueante(s)</p>
+              </div>
+            </button>
+          </div>
+
+          {/* Pill do Filtro Ativo */}
+          {filtroStatus !== 'TODOS' && (
+            <div className="flex items-center justify-between bg-primary/10 border border-primary/20 rounded-xl px-3.5 py-2 text-xs text-primary font-medium">
+              <span>
+                Exibindo apenas itens com filtro: <strong>{filtroStatus.toLowerCase()}</strong> ({itensExibidos.length} de {itensParaTabela.length})
+              </span>
+              <button
+                type="button"
+                onClick={() => setFiltroStatus('TODOS')}
+                className="underline hover:opacity-80 font-bold ml-2"
+              >
+                Limpar filtro
+              </button>
+            </div>
+          )}
 
           {/* Alerta NF-e denegada */}
           {conf.notaFiscal.situacaoFiscal === 'DENEGADA' && (
@@ -220,7 +314,7 @@ export default function ConferenciaPage({ notaFiscalId, onVoltar }: Props) {
           )}
 
           <ConferenciaTable
-            itens={itensParaTabela}
+            itens={itensExibidos}
             onChange={(id, qtd) => setQtdsEditadas((prev) => ({ ...prev, [id]: qtd }))}
             onIdentificar={!jaRecebida ? (item) => setItemIdentificar(item) : undefined}
             onResolverDivergencia={!jaRecebida ? (item) => setDivergenciaResolver({ id: item.divergenciaId, ...item }) : undefined}

@@ -23,7 +23,7 @@ export function errorHandler(
   const statusCode = (err as any).statusCode || (err instanceof AppError ? err.statusCode : null);
   if (statusCode || (err as any).isOperational || err instanceof AppError) {
     const status = statusCode || 400;
-    res.status(status).json({ erro: err.message });
+    res.status(status).json({ erro: err.message, detalhes: (err as any).detalhes });
     return;
   }
 

@@ -390,15 +390,15 @@ export async function vincularPedido(req: AuthRequest, res: Response): Promise<v
 
 export async function identificarProduto(req: AuthRequest, res: Response): Promise<void> {
   const schema = z.object({
-    notaFiscalItemId:    z.string().uuid(),
-    produtoId:           z.string().uuid(),
+    notaFiscalItemId:     z.string().uuid(),
+    produtoId:            z.string().uuid(),
     salvarRelacionamento: z.boolean().default(true),
   });
   const data = schema.parse(req.body);
 
   const nota = await (prisma as any).notaFiscalEntrada.findFirst({
     where: { id: req.params.id, deletedAt: null },
-    select: { fornecedorId: true },
+    select: { fornecedorId: true, chaveAcesso: true, numero: true },
   });
   if (!nota) throw new AppError('Nota Fiscal não encontrada', 404);
 
@@ -417,7 +417,159 @@ export async function identificarProduto(req: AuthRequest, res: Response): Promi
     salvarRelacionamento: data.salvarRelacionamento,
   });
 
+  // Auditoria e Evento (CA-10 / Seção 22)
+  await registrarAuditoria({
+    usuarioId:   req.usuario!.id,
+    acao:        'PRODUTO_ASSOCIADO_NFE',
+    tabela:      'notas_fiscais_itens',
+    registroId:  data.notaFiscalItemId,
+    dadosDepois: {
+      notaFiscalId: req.params.id,
+      chaveAcesso:  nota.chaveAcesso,
+      produtoId:    data.produtoId,
+      gtin:         item.gtin,
+      descricaoNfe: item.descricao,
+    },
+  });
+
+  registrarEventoNfe({
+    nfeId:     req.params.id,
+    tipo:      'PRODUTO_IDENTIFICADO',
+    descricao: `Produto associado manualmente: ${item.descricao}`,
+    usuarioId: req.usuario!.id,
+  });
+
+  // Recalcular divergências
+  await calcularEPersistirDivergencias(req.params.id);
+
   res.json({ mensagem: 'Produto associado com sucesso' });
+}
+
+export async function cadastrarEAssociarProduto(req: AuthRequest, res: Response): Promise<void> {
+  const optionalUuid = z.preprocess(
+    (val) => (val === '' || val === null ? null : val),
+    z.string().uuid().nullable().optional()
+  );
+  const optionalString = z.preprocess(
+    (val) => (val === '' || val === null ? null : val),
+    z.string().nullable().optional()
+  );
+  const optionalNumber = z.preprocess(
+    (val) => (val === '' || val === null || val === undefined ? null : val),
+    z.coerce.number().nullable().optional()
+  );
+
+  const schema = z.object({
+    notaFiscalItemId:     z.string().uuid(),
+    nome:                 z.string().min(2, 'Nome do produto é obrigatório'),
+    codigoBarras:         optionalString,
+    codigoInterno:        optionalString,
+    unidade:              z.string().default('UN'),
+    precoCompra:          z.coerce.number().min(0).default(0),
+    precoVenda:           z.coerce.number().min(0),
+    categoriaId:          optionalUuid,
+    estoqueMinimo:        optionalNumber.transform(val => val ?? 0),
+    salvarRelacionamento: z.boolean().default(true),
+  });
+
+  const data = schema.parse(req.body);
+
+  const nota = await (prisma as any).notaFiscalEntrada.findFirst({
+    where: { id: req.params.id, deletedAt: null },
+    select: { fornecedorId: true, chaveAcesso: true, numero: true },
+  });
+  if (!nota) throw new AppError('Nota Fiscal não encontrada', 404);
+
+  const item = await (prisma as any).notaFiscalItem.findFirst({
+    where: { id: data.notaFiscalItemId, notaFiscalId: req.params.id },
+  });
+  if (!item) throw new AppError('Item não encontrado nesta NF-e', 404);
+
+  // Validação de EAN duplicado (Seção 23 / CA-06)
+  const eanLimpo = data.codigoBarras?.trim();
+  if (eanLimpo && eanLimpo !== '' && eanLimpo.toUpperCase() !== 'SEM GTIN') {
+    const produtoExistente = await prisma.produto.findFirst({
+      where:  { codigoBarras: eanLimpo, deletedAt: null },
+      select: { id: true, nome: true, codigoInterno: true, codigoBarras: true, estoqueAtual: true },
+    });
+    if (produtoExistente) {
+      throw new AppError(
+        `EAN ${eanLimpo} já cadastrado no sistema para o produto "${produtoExistente.nome}" (Cód. ${produtoExistente.codigoInterno || 'S/N'}).`,
+        409,
+        { produtoExistente }
+      );
+    }
+  }
+
+  // Preço de compra / margem
+  const precoCompra = data.precoCompra || Number(item.valorUnitario) || 0;
+  let margemLucro: number | undefined = undefined;
+  if (precoCompra > 0 && data.precoVenda > 0) {
+    margemLucro = ((data.precoVenda - precoCompra) / data.precoVenda) * 100;
+  }
+
+  // Criar o produto com estoqueAtual = 0 (Seção 10: estoque somente atualizado ao confirmar recebimento)
+  const novoProduto = await prisma.produto.create({
+    data: {
+      nome:          data.nome,
+      codigoBarras:  (eanLimpo && eanLimpo.toUpperCase() !== 'SEM GTIN') ? eanLimpo : null,
+      codigoInterno: data.codigoInterno?.trim() || null,
+      unidade:       data.unidade || item.unidade || 'UN',
+      precoCompra:   precoCompra,
+      precoVenda:    data.precoVenda,
+      margemLucro:   margemLucro,
+      categoriaId:   data.categoriaId || null,
+      fornecedorId:  nota.fornecedorId || null,
+      estoqueAtual:  0, // Regulagem estrita: cadastro NÃO insere estoque diretamente
+      estoqueMinimo: data.estoqueMinimo || 0,
+      ativo:         true,
+    },
+    include: { categoria: true },
+  });
+
+  // Realizar associação do item da NF-e com o novo produto
+  await associarProduto({
+    notaFiscalItemId:    data.notaFiscalItemId,
+    produtoId:           novoProduto.id,
+    fornecedorId:        nota.fornecedorId,
+    codigoFornecedor:    item.codigoFornecedor,
+    gtin:                item.gtin,
+    descricaoFornecedor: item.descricao,
+    salvarRelacionamento: data.salvarRelacionamento,
+  });
+
+  // Auditoria (CA-10 / Seção 22)
+  await registrarAuditoria({
+    usuarioId:   req.usuario!.id,
+    acao:        'NOVO_PRODUTO_CADASTRADO_NFE',
+    tabela:      'produtos',
+    registroId:  novoProduto.id,
+    dadosDepois: {
+      notaFiscalId:     req.params.id,
+      chaveAcesso:      nota.chaveAcesso,
+      produtoId:        novoProduto.id,
+      produtoNome:      novoProduto.nome,
+      codigoInterno:    novoProduto.codigoInterno,
+      ean:              novoProduto.codigoBarras,
+      itemNfeDescricao: item.descricao,
+    },
+  });
+
+  // Evento na NF-e
+  registrarEventoNfe({
+    nfeId:     req.params.id,
+    tipo:      'PRODUTO_IDENTIFICADO',
+    descricao: `Novo produto criado e associado: ${novoProduto.nome} (ID ${novoProduto.id})`,
+    usuarioId: req.usuario!.id,
+  });
+
+  // Recalcular divergências
+  await calcularEPersistirDivergencias(req.params.id);
+
+  res.status(201).json({
+    mensagem: 'Produto cadastrado e associado com sucesso',
+    produto:  novoProduto,
+  });
 }
 
 export async function getConferencia(req: AuthRequest, res: Response): Promise<void> {
@@ -426,7 +578,9 @@ export async function getConferencia(req: AuthRequest, res: Response): Promise<v
     include: {
       fornecedor: { select: { id: true, nome: true, cnpj: true } },
       itens: {
-        include: { produto: { select: { id: true, nome: true } } },
+        include: {
+          produto: { select: { id: true, nome: true, codigoBarras: true, codigoInterno: true } },
+        },
         orderBy: { descricao: 'asc' },
       },
       nfePedidos: {
@@ -488,21 +642,27 @@ export async function getConferencia(req: AuthRequest, res: Response): Promise<v
       : null;
 
     return {
-      nfeItemId:           item.id,
-      produtoId:           item.produtoId,
-      produtoNome:         item.produto?.nome ?? null,
-      codigoFornecedor:    item.codigoFornecedor,
-      descricaoNfe:        item.descricao,
-      identificado:        item.identificado,
-      statusIdentificacao: item.statusIdentificacao,
-      quantidadePedida:    pedidoInfo?.quantidade ?? null,
-      quantidadeNfe:       item.quantidade,
-      quantidadeReceber:   item.quantidade,
-      valorUnitario:       Number(item.valorUnitario),
+      nfeItemId:            item.id,
+      produtoId:            item.produtoId,
+      produtoNome:          item.produto?.nome ?? null,
+      codigoInternoProduto: item.produto?.codigoInterno ?? null,
+      codigoBarrasProduto:  item.produto?.codigoBarras ?? null,
+      codigoFornecedor:     item.codigoFornecedor,
+      gtin:                 item.gtin ?? null,
+      descricaoNfe:         item.descricao,
+      unidade:              item.unidade,
+      ncm:                  item.ncm,
+      cest:                 item.cest,
+      identificado:         item.identificado,
+      statusIdentificacao:  item.statusIdentificacao,
+      quantidadePedida:     pedidoInfo?.quantidade ?? null,
+      quantidadeNfe:        item.quantidade,
+      quantidadeReceber:    item.quantidade,
+      valorUnitario:        Number(item.valorUnitario),
       tipoDivergencia,
       classificacao,
-      divergenciaId:       divPersistida?.id ?? null,
-      divergenciaStatus:   divPersistida?.status ?? null,
+      divergenciaId:        divPersistida?.id ?? null,
+      divergenciaStatus:    divPersistida?.status ?? null,
     };
   });
 

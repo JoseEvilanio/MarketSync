@@ -43,12 +43,45 @@ const vendaSchema = z.object({
 export async function registrar(req: AuthRequest, res: Response): Promise<void> {
   const data = vendaSchema.parse(req.body);
 
+  // Validação Estrita do Caixa (PRD Segurança PDV - Seções 3, 4, 22)
+  let caixaIdFinal = data.caixaId;
+  if (caixaIdFinal) {
+    const caixaInformado = await prisma.caixa.findFirst({
+      where: { id: caixaIdFinal },
+      select: { id: true, status: true },
+    });
+    if (!caixaInformado || caixaInformado.status !== 'ABERTO') {
+      throw new AppError(
+        'O caixa está fechado. Abra o caixa para iniciar uma venda.',
+        409,
+        { code: 'CAIXA_FECHADO' }
+      );
+    }
+  } else {
+    // Buscar caixa aberto do operador logado
+    const caixaOperador = await prisma.caixa.findFirst({
+      where: { usuarioId: req.usuario!.id, status: 'ABERTO' },
+      select: { id: true },
+    });
+    if (!caixaOperador) {
+      throw new AppError(
+        'O caixa está fechado. Abra o caixa para iniciar uma venda.',
+        409,
+        { code: 'CAIXA_FECHADO' }
+      );
+    }
+    caixaIdFinal = caixaOperador.id;
+  }
+
   // Verificar estoque de todos os itens antes de registrar
   for (const item of data.itens) {
+    if (item.quantidade <= 0) {
+      throw new AppError('Quantidade do item deve ser maior que zero', 422);
+    }
     const produto = await prisma.produto.findFirst({
       where: { id: item.produtoId, deletedAt: null, ativo: true },
     });
-    if (!produto) throw new AppError(`Produto ${item.produtoId} não encontrado`, 404);
+    if (!produto) throw new AppError(`Produto não encontrado ou inativo (ID ${item.produtoId})`, 404);
     if (produto.estoqueAtual < item.quantidade) {
       throw new AppError(`Estoque insuficiente para: ${produto.nome}`, 422);
     }
@@ -83,7 +116,7 @@ export async function registrar(req: AuthRequest, res: Response): Promise<void> 
       data: {
         usuarioId: req.usuario!.id,
         clienteId: data.clienteId,
-        caixaId: data.caixaId,
+        caixaId: caixaIdFinal,
         subtotal,
         desconto: data.desconto,
         total,

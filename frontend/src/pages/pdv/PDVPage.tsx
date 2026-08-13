@@ -9,6 +9,7 @@ import { formatCurrency } from '@/utils/format';
 import Modal from '@/components/ui/Modal';
 import ModalCaixa from '@/components/ui/ModalCaixa';
 import { ModalFinalizacaoPDV } from '@/components/pdv/ModalFinalizacaoPDV';
+import { ModalConfirmarCancelamentoPDV } from '@/components/pdv/ModalConfirmarCancelamentoPDV';
 
 export default function PDVPage() {
   const navigate = useNavigate();
@@ -24,6 +25,10 @@ export default function PDVPage() {
   const [modalCliente, setModalCliente] = useState(false);
   const [modalCaixa, setModalCaixa] = useState(false);
   
+  // Modais de cancelamento (PRD Segurança PDV)
+  const [modalConfirmRemoverItem, setModalConfirmRemoverItem] = useState(false);
+  const [modalConfirmCancelarVenda, setModalConfirmCancelarVenda] = useState(false);
+
   // Modal de peso (PRD v1.2)
   const [produtoPesoPending, setProdutoPesoPending] = useState<any | null>(null);
   const [pesoInput, setPesoInput] = useState('');
@@ -54,8 +59,9 @@ export default function PDVPage() {
     enabled: modalCliente,
   });
 
-  // Caixa aberto
+  // Estado do Caixa do Operador
   const { data: caixa } = useQuery({ queryKey: ['caixa-atual'], queryFn: caixaService.atual });
+  const isCaixaAberto = Boolean(caixa && caixa.status === 'ABERTO');
 
   // Busca de produto com suporte a Multiplicador (Qtd*Código) e Venda por Peso
   const buscarProduto = useMutation({
@@ -90,9 +96,12 @@ export default function PDVPage() {
     },
   });
 
-  // Finalizar venda
+  // Finalizar venda com validação de Caixa
   const finalizarVenda = useMutation({
     mutationFn: () => {
+      if (!isCaixaAberto) {
+        throw new Error('O caixa está fechado. Abra o caixa para registrar uma venda.');
+      }
       const restante = store.total() - store.totalPago();
       if (restante > 0) {
         throw new Error('Ainda existe saldo pendente.');
@@ -116,15 +125,24 @@ export default function PDVPage() {
       toast.success(`Venda #${venda.numero} registrada!`);
       vendasService.auditoriaEvento('VENDA_FINALIZADA', { vendaId: venda.id, numero: venda.numero, total: venda.total });
       store.limparCarrinho();
+      setItemSel(null);
       setModalPag(false);
       barcodeRef.current?.focus();
     },
-    onError: (err: any) => toast.error(err.message || 'Erro ao registrar venda'),
+    onError: (err: any) => {
+      const msg = err?.response?.data?.erro || err.message || 'Erro ao registrar venda';
+      toast.error(msg);
+    },
   });
 
-  // Parser do código de barras com multiplicador (PRD v1.2 - Seção 3)
+  // Parser do código de barras com multiplicador (PRD Seção 7)
   function handleBarcodeSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!isCaixaAberto) {
+      toast.error('O caixa está fechado. Abra o caixa (F7) para iniciar as vendas.');
+      return;
+    }
+
     const raw = codigoInput.trim();
     if (!raw) return;
 
@@ -155,9 +173,13 @@ export default function PDVPage() {
     buscarProduto.mutate({ rawInput: raw, quantidade, codigo });
   }
 
-  // Confirmar Peso de Item (PRD v1.2 - Seção 4)
+  // Confirmar Peso de Item (PRD Seção 7)
   function confirmarPesoItem(e?: React.FormEvent) {
     e?.preventDefault();
+    if (!isCaixaAberto) {
+      toast.error('O caixa está fechado.');
+      return;
+    }
     if (!produtoPesoPending) return;
     const peso = parseFloat(pesoInput.replace(',', '.'));
     if (isNaN(peso) || peso <= 0) {
@@ -193,23 +215,98 @@ export default function PDVPage() {
     barcodeRef.current?.focus();
   }
 
-  // Atalhos de teclado (PRD v1.2 - F para finalizar, ESC preservando venda, 2-7 escolhem pagamentos)
-  const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    const isModalOpen = modalPag || modalDesc || modalCliente || modalCaixa || Boolean(produtoPesoPending);
+  // ── Confirmação de Remoção de Item (Atalhos R / F6) ──
+  function confirmarRemoverItem() {
+    if (!itemSel) return;
+    const itemRem = store.itens.find((i) => i.produtoId === itemSel);
+    store.removerItem(itemSel);
+    vendasService.auditoriaEvento('REMOVER_ITEM', {
+      produtoId: itemSel,
+      nome: itemRem?.nome,
+      quantidade: itemRem?.quantidade,
+      subtotal: itemRem?.subtotal,
+    });
+    toast.success(`Item "${itemRem?.nome || ''}" removido da venda.`);
+    setItemSel(null);
+    setModalConfirmRemoverItem(false);
+    barcodeRef.current?.focus();
+  }
 
-    // Atalho 'F' para finalização de venda (PRD v1.2 Seção 2)
-    if ((e.key === 'f' || e.key === 'F') && !isModalOpen) {
-      const activeEl = document.activeElement;
-      // Se não estiver digitando texto livre no input
-      if (activeEl !== barcodeRef.current || !codigoInput.trim()) {
-        e.preventDefault();
-        if (store.itens.length > 0) {
-          setModalPag(true);
-        } else {
-          toast.error('Adicione pelo menos um item para finalizar a venda.');
-        }
+  // ── Confirmação de Cancelamento de Toda a Venda (Atalho E) ──
+  function confirmarCancelarVenda() {
+    vendasService.auditoriaEvento('CANCELAR_VENDA_PDV', {
+      totalItens: store.itens.length,
+      totalValor: store.total(),
+    });
+    store.limparCarrinho();
+    setItemSel(null);
+    setModalConfirmCancelarVenda(false);
+    toast.success('Venda cancelada.');
+    barcodeRef.current?.focus();
+  }
+
+  // ── Atalhos de teclado (PRD Seção 8, 10, 12, 13, 14) ──
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    const isModalOpen = modalPag || modalDesc || modalCliente || modalCaixa || Boolean(produtoPesoPending) || modalConfirmRemoverItem || modalConfirmCancelarVenda;
+
+    if (isModalOpen) return;
+
+    const activeEl = document.activeElement;
+    const isBarcodeFocused = activeEl === barcodeRef.current;
+    const isInputTyping = isBarcodeFocused && codigoInput.trim().length > 0;
+
+    // Navegação por setas (↑ e ↓) na lista de itens (Seção 14)
+    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !isInputTyping && store.itens.length > 0) {
+      e.preventDefault();
+      const currentIdx = store.itens.findIndex((i) => i.produtoId === itemSel);
+      if (e.key === 'ArrowDown') {
+        const nextIdx = currentIdx < 0 ? 0 : (currentIdx + 1) % store.itens.length;
+        setItemSel(store.itens[nextIdx].produtoId);
+      } else if (e.key === 'ArrowUp') {
+        const prevIdx = currentIdx <= 0 ? store.itens.length - 1 : currentIdx - 1;
+        setItemSel(store.itens[prevIdx].produtoId);
+      }
+      return;
+    }
+
+    // Atalho 'R' ou 'F6' para remover item selecionado (Seção 8, 12, 13)
+    if ((e.key === 'r' || e.key === 'R' || e.key === 'F6') && !isInputTyping) {
+      e.preventDefault();
+      if (store.itens.length === 0) {
+        toast.error('Nenhum item na venda para remover.');
         return;
       }
+      if (!itemSel && store.itens.length > 0) {
+        setItemSel(store.itens[store.itens.length - 1].produtoId);
+      }
+      setModalConfirmRemoverItem(true);
+      return;
+    }
+
+    // Atalho 'E' para cancelar venda inteira (Seção 10, 11, 12)
+    if ((e.key === 'e' || e.key === 'E') && !isInputTyping) {
+      e.preventDefault();
+      if (store.itens.length === 0) {
+        toast.error('Nenhuma venda em andamento para cancelar.');
+        return;
+      }
+      setModalConfirmCancelarVenda(true);
+      return;
+    }
+
+    // Atalho 'F' ou 'F5' para finalizar venda (Seção 13, 24)
+    if ((e.key === 'f' || e.key === 'F' || e.key === 'F5') && !isInputTyping) {
+      e.preventDefault();
+      if (!isCaixaAberto) {
+        toast.error('O caixa está fechado. Abra o caixa (F7) para vender.');
+        return;
+      }
+      if (store.itens.length > 0) {
+        setModalPag(true);
+      } else {
+        toast.error('Adicione pelo menos um item para finalizar a venda.');
+      }
+      return;
     }
 
     switch (e.key) {
@@ -225,46 +322,18 @@ export default function PDVPage() {
         e.preventDefault();
         if (store.itens.length) setModalDesc(true);
         break;
-      case 'F5':
-        // F5 mantido como fallback para abrir ou concluir
-        e.preventDefault();
-        if (store.itens.length) setModalPag(true);
-        break;
-      case 'F6':
-        e.preventDefault();
-        if (itemSel) {
-          const itemRem = store.itens.find((i) => i.produtoId === itemSel);
-          store.removerItem(itemSel);
-          setItemSel(null);
-          vendasService.auditoriaEvento('REMOVER_ITEM', { produtoId: itemSel, nome: itemRem?.nome });
-        }
-        break;
       case 'F7':
         e.preventDefault();
         setModalCaixa(true);
         break;
       case 'Escape':
         e.preventDefault();
-        if (modalPag) {
-          // ESC tratado pelo ModalFinalizacaoPDV (PRD v2.0 Seção 13 e 14)
-          return;
-        } else if (produtoPesoPending) {
-          setProdutoPesoPending(null);
-          barcodeRef.current?.focus();
-        } else if (modalDesc) {
-          setModalDesc(false);
-          barcodeRef.current?.focus();
-        } else if (modalCliente) {
-          setModalCliente(false);
-          barcodeRef.current?.focus();
-        } else if (store.itens.length && confirm('Deseja realmente cancelar a venda atual?')) {
-          store.limparCarrinho();
-          setItemSel(null);
-          vendasService.auditoriaEvento('CANCELAR_VENDA_PDV');
+        if (store.itens.length > 0) {
+          setModalConfirmCancelarVenda(true);
         }
         break;
     }
-  }, [store, itemSel, modalPag, modalDesc, modalCliente, modalCaixa, produtoPesoPending, codigoInput]);
+  }, [store, itemSel, modalPag, modalDesc, modalCliente, modalCaixa, produtoPesoPending, modalConfirmRemoverItem, modalConfirmCancelarVenda, codigoInput, isCaixaAberto]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
@@ -272,8 +341,10 @@ export default function PDVPage() {
   }, [handleKeyDown]);
 
   useEffect(() => {
-    barcodeRef.current?.focus();
-  }, []);
+    if (isCaixaAberto) {
+      barcodeRef.current?.focus();
+    }
+  }, [isCaixaAberto]);
 
   function aplicarDesconto() {
     const val = parseFloat(descInput);
@@ -285,6 +356,8 @@ export default function PDVPage() {
     barcodeRef.current?.focus();
   }
 
+  const itemSelInfo = store.itens.find((i) => i.produtoId === itemSel);
+
   return (
     <div className="h-screen flex flex-col bg-background overflow-hidden">
       {/* Header */}
@@ -294,21 +367,20 @@ export default function PDVPage() {
             <span className="material-symbols-outlined">arrow_back</span>
           </button>
           <h1 className="text-headline-md font-black text-on-surface">PDV — Frente de Caixa (v2.0)</h1>
-          {caixa && (
-            <span className="badge badge-success text-[11px]">
+          {isCaixaAberto ? (
+            <span className="badge badge-success text-[11px] flex items-center gap-1 font-semibold">
               <span className="material-symbols-outlined text-[14px]">lock_open</span>
               Caixa Aberto
             </span>
-          )}
-          {!caixa && (
-            <span
+          ) : (
+            <button
               onClick={() => setModalCaixa(true)}
-              className="badge badge-error text-[11px] cursor-pointer hover:brightness-90"
+              className="badge badge-error text-[11px] cursor-pointer hover:brightness-90 flex items-center gap-1 font-bold animate-pulse"
               title="Clique para abrir o caixa"
             >
               <span className="material-symbols-outlined text-[14px]">lock</span>
-              Caixa Fechado — clique para abrir
-            </span>
+              🔒 Caixa Fechado — clique para abrir (F7)
+            </button>
           )}
         </div>
         <div className="flex items-center gap-pos-gutter text-on-surface-variant text-body-sm">
@@ -319,7 +391,30 @@ export default function PDVPage() {
       </header>
 
       {/* Body */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative">
+
+        {/* ── 1. Painel de Alerta Visual quando Caixa está Fechado (Seção 5, 25) ── */}
+        {!isCaixaAberto && (
+          <div className="absolute inset-0 bg-surface/90 backdrop-blur-sm z-30 flex flex-col items-center justify-center p-6 text-center space-y-4">
+            <div className="w-20 h-20 bg-red-100 border border-red-300 rounded-full flex items-center justify-center text-red-600 shadow-md">
+              <span className="material-symbols-outlined text-[48px]">lock</span>
+            </div>
+            <div className="max-w-md space-y-1">
+              <h2 className="text-2xl font-black text-on-surface">CAIXA FECHADO</h2>
+              <p className="text-sm text-on-surface-variant leading-relaxed">
+                Abra o caixa antes de registrar produtos ou iniciar qualquer operação de venda no PDV.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setModalCaixa(true)}
+              className="btn-primary text-base font-bold px-6 py-3 shadow-lg flex items-center gap-2"
+            >
+              <span className="material-symbols-outlined text-[20px]">key</span>
+              [ F7 — ABRIR CAIXA ]
+            </button>
+          </div>
+        )}
 
         {/* ── Lado esquerdo: lista de itens ── */}
         <div className="w-[58%] bg-primary text-on-primary flex flex-col h-full">
@@ -341,61 +436,57 @@ export default function PDVPage() {
                 <p className="text-body-lg">Escaneie ou digite um código para começar</p>
               </div>
             )}
-            {store.itens.map((item, idx) => (
-              <div
-                key={`${item.produtoId}-${idx}`}
-                onClick={() => setItemSel(item.produtoId === itemSel ? null : item.produtoId)}
-                className={`flex px-md py-sm border-b border-surface-tint items-center cursor-pointer transition-colors ${
-                  item.produtoId === itemSel ? 'bg-secondary/20' : 'hover:bg-surface-tint/20'
-                }`}
-              >
-                <div className="w-10 shrink-0 text-on-primary-container">{String(idx + 1).padStart(3, '0')}</div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-on-primary truncate">{item.nome}</div>
-                  {item.tipoVenda === 'PESO' ? (
-                    <div className="text-xs text-secondary-fixed font-bold">
-                      {item.peso?.toFixed(3)} Kg x {formatCurrency(item.valorKg || item.precoUnit)}
-                    </div>
-                  ) : (
-                    item.codigoBarras && <div className="text-xs text-on-primary-container">{item.codigoBarras}</div>
-                  )}
-                </div>
-                <div className="w-24 text-right">
-                  {item.tipoVenda === 'PESO' ? (
-                    <span className="font-bold text-secondary-fixed">{item.peso?.toFixed(3)} Kg</span>
-                  ) : (
-                    <input
-                      type="number"
-                      min="0.001"
-                      step="0.001"
-                      value={item.quantidade}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => {
-                        const newQtd = parseFloat(e.target.value) || 0;
-                        store.alterarQuantidade(item.produtoId, newQtd);
-                        vendasService.auditoriaEvento('ALTERACAO_QUANTIDADE', { produtoId: item.produtoId, novaQtd: newQtd });
+            {store.itens.map((item, idx) => {
+              const isSelected = item.produtoId === itemSel;
+              return (
+                <div
+                  key={`${item.produtoId}-${idx}`}
+                  onClick={() => setItemSel(isSelected ? null : item.produtoId)}
+                  className={`flex px-md py-sm border-b border-surface-tint items-center cursor-pointer transition-colors ${
+                    isSelected
+                      ? 'bg-secondary/30 border-l-4 border-l-secondary-fixed font-bold'
+                      : 'hover:bg-surface-tint/20'
+                  }`}
+                >
+                  <div className="w-10 shrink-0 text-on-primary-container">{String(idx + 1).padStart(3, '0')}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-on-primary truncate">{item.nome}</div>
+                    {item.tipoVenda === 'PESO' ? (
+                      <div className="text-xs text-secondary-fixed font-bold">
+                        {item.peso?.toFixed(3)} Kg x {formatCurrency(item.valorKg || item.precoUnit)}
+                      </div>
+                    ) : (
+                      item.codigoBarras && <div className="text-xs text-on-primary-container">{item.codigoBarras}</div>
+                    )}
+                  </div>
+
+                  {/* Quantidade na tabela (Estática, sem <input type="number"> - Seção 6, 24) */}
+                  <div className="w-24 text-right font-mono font-bold text-on-primary">
+                    {item.tipoVenda === 'PESO' ? (
+                      <span className="text-secondary-fixed">{item.peso?.toFixed(3)} Kg</span>
+                    ) : (
+                      <span>{item.quantidade}</span>
+                    )}
+                  </div>
+
+                  <div className="w-24 text-right">{formatCurrency(item.precoUnit)}</div>
+                  <div className="w-28 text-right font-bold text-secondary-fixed">{formatCurrency(item.subtotal)}</div>
+                  <div className="w-8 flex justify-end">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setItemSel(item.produtoId);
+                        setModalConfirmRemoverItem(true);
                       }}
-                      className="w-16 bg-surface-tint/30 text-on-primary text-right rounded px-1 border border-surface-tint focus:outline-none focus:border-secondary-fixed"
-                    />
-                  )}
+                      title="Remover item (R / F6)"
+                      className="p-1 text-on-primary-container hover:text-error transition-colors"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">close</span>
+                    </button>
+                  </div>
                 </div>
-                <div className="w-24 text-right">{formatCurrency(item.precoUnit)}</div>
-                <div className="w-28 text-right font-bold text-secondary-fixed">{formatCurrency(item.subtotal)}</div>
-                <div className="w-8 flex justify-end">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      store.removerItem(item.produtoId);
-                      if (itemSel === item.produtoId) setItemSel(null);
-                      vendasService.auditoriaEvento('REMOVER_ITEM', { produtoId: item.produtoId });
-                    }}
-                    className="p-1 text-on-primary-container hover:text-error transition-colors"
-                  >
-                    <span className="material-symbols-outlined text-[16px]">close</span>
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Input de código com multiplicador */}
@@ -408,9 +499,14 @@ export default function PDVPage() {
                 <input
                   ref={barcodeRef}
                   value={codigoInput}
+                  disabled={!isCaixaAberto}
                   onChange={(e) => setCodigoInput(e.target.value)}
-                  placeholder="Código de barras ou Qtd*Código (Ex: 3*789... / F2)"
-                  className="w-full bg-primary text-on-primary border border-surface-tint rounded h-12 pl-10 pr-sm text-data-mono focus:border-secondary-fixed focus:ring-1 focus:ring-secondary-fixed outline-none placeholder:text-on-primary-container/50"
+                  placeholder={
+                    isCaixaAberto
+                      ? "Código de barras ou Qtd*Código (Ex: 3*789... / F2)"
+                      : "🔒 Caixa fechado — abra o caixa para vender (F7)"
+                  }
+                  className="w-full bg-primary text-on-primary border border-surface-tint rounded h-12 pl-10 pr-sm text-data-mono focus:border-secondary-fixed focus:ring-1 focus:ring-secondary-fixed outline-none placeholder:text-on-primary-container/50 disabled:opacity-50 disabled:cursor-not-allowed"
                   autoComplete="off"
                 />
                 {buscarProduto.isPending && (
@@ -512,7 +608,7 @@ export default function PDVPage() {
             {/* Botão finalizar (Atalhos F ou F5) */}
             <button
               onClick={() => store.itens.length && setModalPag(true)}
-              disabled={!store.itens.length || finalizarVenda.isPending}
+              disabled={!store.itens.length || finalizarVenda.isPending || !isCaixaAberto}
               className="w-full bg-success text-white text-headline-md font-bold rounded-lg h-16 flex items-center justify-center gap-sm hover:brightness-90 transition-all active:scale-95 disabled:opacity-40 shadow-sm"
             >
               <span className="material-symbols-outlined icon-filled text-[24px]">point_of_sale</span>
@@ -522,26 +618,52 @@ export default function PDVPage() {
         </div>
       </div>
 
-      {/* ── Footer atalhos ── */}
-      <footer className="bg-primary-container border-t border-primary flex justify-center items-center gap-xl py-sm h-14 shrink-0">
+      {/* ── Footer atalhos (Seção 24) ── */}
+      <footer className="bg-primary-container border-t border-primary flex justify-center items-center gap-lg py-sm h-14 shrink-0 overflow-x-auto">
         <span className="text-label-md text-on-primary-container absolute left-md">
           {store.itens.length} item(s) · {formatCurrency(store.total())}
         </span>
         {[
-          { key: 'F2', label: 'Buscar' },
-          { key: 'F3', label: 'Cliente' },
-          { key: 'F4', label: 'Desconto' },
-          { key: 'F',  label: 'Finalizar' },
-          { key: 'F6', label: 'Remover' },
-          { key: 'F7', label: 'Caixa' },
-          { key: 'ESC', label: 'Fechar Modal' },
+          { key: 'F',   label: 'Finalizar' },
+          { key: 'F2',  label: 'Buscar' },
+          { key: 'F3',  label: 'Cliente' },
+          { key: 'F4',  label: 'Desconto' },
+          { key: 'F6/R', label: 'Remover' },
+          { key: 'F7',  label: 'Caixa' },
+          { key: 'E',   label: 'Cancelar Venda' },
+          { key: '↑↓',  label: 'Navegar' },
         ].map(({ key, label }) => (
           <div key={key} className="flex items-center gap-xs text-on-primary-container hover:text-secondary-fixed transition-colors cursor-default">
-            <span className="bg-primary text-on-primary px-sm py-xs rounded text-[11px] font-mono border border-surface-tint">{key}</span>
-            <span className="text-label-md">{label}</span>
+            <span className="bg-primary text-on-primary px-sm py-xs rounded text-[11px] font-mono border border-surface-tint font-bold">{key}</span>
+            <span className="text-label-md font-medium">{label}</span>
           </div>
         ))}
       </footer>
+
+      {/* ── Modal Confirmar Cancelamento / Remoção (Seção 8, 10) ── */}
+      <ModalConfirmarCancelamentoPDV
+        open={modalConfirmRemoverItem}
+        onClose={() => setModalConfirmRemoverItem(false)}
+        onConfirm={confirmarRemoverItem}
+        tipo="ITEM"
+        itemInfo={itemSelInfo ? {
+          nome: itemSelInfo.nome,
+          quantidade: itemSelInfo.quantidade,
+          subtotal: itemSelInfo.subtotal,
+          unidade: itemSelInfo.tipoVenda === 'PESO' ? 'Kg' : 'UN',
+        } : null}
+      />
+
+      <ModalConfirmarCancelamentoPDV
+        open={modalConfirmCancelarVenda}
+        onClose={() => setModalConfirmCancelarVenda(false)}
+        onConfirm={confirmarCancelarVenda}
+        tipo="VENDA"
+        vendaInfo={{
+          totalItens: store.itens.length,
+          totalValor: store.total(),
+        }}
+      />
 
       {/* ── Modal Informar Peso (PRD v1.2 - Seção 4) ── */}
       <Modal open={Boolean(produtoPesoPending)} onClose={() => setProdutoPesoPending(null)} title="Informar Peso" size="sm">

@@ -2,21 +2,27 @@ import { formatCurrency } from '@/utils/format';
 import DivergenciaBadge from './DivergenciaBadge';
 
 export interface ConferenciaItem {
-  nfeItemId:           string | null;
-  produtoId:           string | null;
-  produtoNome:         string | null;
-  codigoFornecedor:    string;
-  descricaoNfe:        string;
-  identificado:        boolean;
+  nfeItemId:            string | null;
+  produtoId:            string | null;
+  produtoNome:          string | null;
+  codigoInternoProduto?: string | null;
+  codigoBarrasProduto?:  string | null;
+  codigoFornecedor:     string;
+  gtin?:                string | null;
+  descricaoNfe:         string;
+  unidade?:             string;
+  ncm?:                 string | null;
+  cest?:                string | null;
+  identificado:         boolean;
   statusIdentificacao?: string;
-  quantidadePedida:    number | null;
-  quantidadeNfe:       number;
-  quantidadeReceber:   number;
-  valorUnitario:       number;
-  tipoDivergencia:     string | null;
-  classificacao:       'BLOQUEANTE' | 'ALERTA' | null;
-  divergenciaId?:      string | null;
-  divergenciaStatus?:  string | null;
+  quantidadePedida:     number | null;
+  quantidadeNfe:        number;
+  quantidadeReceber:    number;
+  valorUnitario:        number;
+  tipoDivergencia:      string | null;
+  classificacao:        'BLOQUEANTE' | 'ALERTA' | null;
+  divergenciaId?:       string | null;
+  divergenciaStatus?:   string | null;
 }
 
 interface Props {
@@ -76,18 +82,29 @@ export default function ConferenciaTable({ itens, onChange, onIdentificar, onRes
                   <td className="td px-4 py-2.5">
                     {item.identificado ? (
                       <div>
-                        <p className="font-medium text-on-surface">{item.produtoNome}</p>
-                        <p className="text-xs text-on-surface-variant">{item.descricaoNfe}</p>
+                        <p className="font-semibold text-on-surface">{item.produtoNome}</p>
+                        <p className="text-xs text-on-surface-variant font-mono">
+                          {[
+                            item.codigoInternoProduto ? `Cód. ${item.codigoInternoProduto}` : null,
+                            (item.codigoBarrasProduto || item.gtin) ? `EAN: ${item.codigoBarrasProduto || item.gtin}` : null,
+                          ].filter(Boolean).join(' • ') || (
+                            <span className="italic text-gray-400">Sem código/EAN</span>
+                          )}
+                        </p>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 justify-between">
                         <div>
-                          <p className="text-on-surface-variant italic">{item.descricaoNfe}</p>
-                          <p className="text-xs text-on-surface-variant">Cód: {item.codigoFornecedor}</p>
+                          <p className="font-semibold text-on-surface italic">{item.descricaoNfe}</p>
+                          <p className="text-xs text-on-surface-variant font-mono">
+                            Cód. Fornecedor: {item.codigoFornecedor}
+                            {item.gtin && ` • EAN: ${item.gtin}`}
+                          </p>
                         </div>
                         {onIdentificar && !readonly && item.nfeItemId && (
                           <button type="button" onClick={() => onIdentificar(item)}
-                            className="text-xs text-primary bg-primary/10 hover:bg-primary/20 px-2 py-1 rounded-lg transition shrink-0">
+                            className="text-xs font-semibold text-primary bg-primary/10 hover:bg-primary/20 border border-primary/20 px-2.5 py-1 rounded-lg transition shrink-0 flex items-center gap-1">
+                            <span className="material-symbols-outlined text-[14px]">search</span>
                             Identificar
                           </button>
                         )}

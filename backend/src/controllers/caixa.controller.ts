@@ -56,6 +56,17 @@ export async function fecharCaixa(req: AuthRequest, res: Response): Promise<void
   });
   if (!caixa) throw new AppError('Caixa não encontrado ou já fechado', 404);
 
+  // Impedir fechamento se houver vendas em andamento (PRD Seção 21)
+  const vendaAberta = await prisma.venda.findFirst({
+    where: { caixaId, status: 'ABERTA', deletedAt: null },
+  });
+  if (vendaAberta) {
+    throw new AppError(
+      'Existem vendas em andamento neste caixa. Finalize ou cancele as vendas antes de fechar o caixa.',
+      409
+    );
+  }
+
   // Calcular valor esperado
   const totalEntradas = caixa.movimentos
     .filter((m) => ['ABERTURA', 'SUPRIMENTO', 'VENDA'].includes(m.tipo))

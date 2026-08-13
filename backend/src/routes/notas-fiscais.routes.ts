@@ -18,6 +18,7 @@ router.get('/:id',                 ctrl.buscarPorId);
 // Operações por NF-e
 router.post('/:id/vincular-pedido',     ctrl.vincularPedido);
 router.post('/:id/identificar-produto', ctrl.identificarProduto);
+router.post('/:id/cadastrar-produto',   ctrl.cadastrarEAssociarProduto);
 router.get( '/:id/conferencia',         ctrl.getConferencia);
 router.post('/:id/receber',             ctrl.receber);
 router.post('/:id/cancelar',            ctrl.cancelar);
