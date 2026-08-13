@@ -27,6 +27,10 @@ export default function ModalCaixa({ open, onClose }: Props) {
   const qc = useQueryClient();
   const [sub, setSub] = useState<SubModal>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const inputAbrirRef = useRef<HTMLInputElement | null>(null);
+  const inputFecharRef = useRef<HTMLInputElement | null>(null);
+  const inputSangriaRef = useRef<HTMLInputElement | null>(null);
+  const inputSuprimentoRef = useRef<HTMLInputElement | null>(null);
 
   const { data: caixa, isLoading } = useQuery({
     queryKey: ['caixa-atual'],
@@ -42,15 +46,32 @@ export default function ModalCaixa({ open, onClose }: Props) {
     }
     if (!open) {
       setSub(null);
-    } else {
-      // Tirar o foco do input do fundo (PDV) e focar o container do modal imediatamente
-      if (document.activeElement instanceof HTMLElement) {
-        document.activeElement.blur();
-      }
-      setTimeout(() => {
-        containerRef.current?.focus();
-      }, 50);
+      return;
     }
+
+    // Focar e selecionar automaticamente o campo de entrada do valor
+    const t = setTimeout(() => {
+      if (sub === 'abrir') {
+        inputAbrirRef.current?.focus();
+        inputAbrirRef.current?.select();
+      } else if (sub === 'fechar') {
+        inputFecharRef.current?.focus();
+        inputFecharRef.current?.select();
+      } else if (sub === 'sangria') {
+        inputSangriaRef.current?.focus();
+        inputSangriaRef.current?.select();
+      } else if (sub === 'suprimento') {
+        inputSuprimentoRef.current?.focus();
+        inputSuprimentoRef.current?.select();
+      } else if (sub === null) {
+        if (document.activeElement instanceof HTMLElement) {
+          document.activeElement.blur();
+        }
+        containerRef.current?.focus();
+      }
+    }, 100);
+
+    return () => clearTimeout(t);
   }, [open, isLoading, caixa, sub]);
 
   // Atalhos de teclado no modal principal do caixa (1, 2, 3)
@@ -59,7 +80,7 @@ export default function ModalCaixa({ open, onClose }: Props) {
 
     function handleKey(e: KeyboardEvent) {
       const active = document.activeElement as HTMLElement;
-      // Se o foco estiver em um input dentro do sub-modal, não interceptar
+      // Se o foco estiver em um input dentro de um formulário, não interceptar
       if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) {
         const isInsideSubModal = active.closest('form');
         if (isInsideSubModal) return;
@@ -123,6 +144,11 @@ export default function ModalCaixa({ open, onClose }: Props) {
     .filter((m: any) => m.tipo === 'VENDA')
     .reduce((a: number, m: any) => a + Number(m.valor), 0);
   const saldoAtual = totalEntradas - totalSaidas;
+
+  const regAbrirProps = regAbrir('valorAbertura', { required: true, valueAsNumber: true });
+  const regFecharProps = regFechar('valorContado', { required: true, valueAsNumber: true });
+  const regSangriaProps = regSangria('valor', { required: true, valueAsNumber: true });
+  const regSupProps = regSup('valor', { required: true, valueAsNumber: true });
 
   return (
     <>
@@ -260,7 +286,11 @@ export default function ModalCaixa({ open, onClose }: Props) {
           <div>
             <label className="label">Valor de Abertura (R$) *</label>
             <input
-              {...regAbrir('valorAbertura', { required: true, valueAsNumber: true })}
+              {...regAbrirProps}
+              ref={(e) => {
+                regAbrirProps.ref(e);
+                inputAbrirRef.current = e;
+              }}
               type="number" step="0.01" min="0"
               className="input-lg text-center text-xl font-bold"
               placeholder="0,00"
@@ -287,7 +317,11 @@ export default function ModalCaixa({ open, onClose }: Props) {
           <div>
             <label className="label">Valor Contado (R$) *</label>
             <input
-              {...regFechar('valorContado', { required: true, valueAsNumber: true })}
+              {...regFecharProps}
+              ref={(e) => {
+                regFecharProps.ref(e);
+                inputFecharRef.current = e;
+              }}
               type="number" step="0.01" min="0"
               className="input-lg text-center text-xl font-bold"
               placeholder="0,00"
@@ -314,7 +348,11 @@ export default function ModalCaixa({ open, onClose }: Props) {
           <div>
             <label className="label">Valor (R$) *</label>
             <input
-              {...regSangria('valor', { required: true, valueAsNumber: true })}
+              {...regSangriaProps}
+              ref={(e) => {
+                regSangriaProps.ref(e);
+                inputSangriaRef.current = e;
+              }}
               type="number" step="0.01" min="0.01"
               className="input-lg text-center"
               placeholder="0,00"
@@ -340,7 +378,11 @@ export default function ModalCaixa({ open, onClose }: Props) {
           <div>
             <label className="label">Valor (R$) *</label>
             <input
-              {...regSup('valor', { required: true, valueAsNumber: true })}
+              {...regSupProps}
+              ref={(e) => {
+                regSupProps.ref(e);
+                inputSuprimentoRef.current = e;
+              }}
               type="number" step="0.01" min="0.01"
               className="input-lg text-center"
               placeholder="0,00"
