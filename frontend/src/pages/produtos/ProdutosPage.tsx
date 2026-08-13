@@ -45,6 +45,9 @@ export default function ProdutosPage() {
     queryFn: categoriasService.listar,
   });
 
+  // Apenas categorias ativas para os selects de produto
+  const categoriasAtivas = (categorias || []).filter((c: any) => c.ativo);
+
   const { data: fornecedores } = useQuery({
     queryKey: ['fornecedores-lista'],
     queryFn: () => fornecedoresService.listar({ limit: 200 }),
@@ -161,7 +164,7 @@ export default function ProdutosPage() {
           <select value={catFilter} onChange={(e) => { setCatFilter(e.target.value); setPage(1); }}
             className="input min-w-40">
             <option value="">Todas</option>
-            {(categorias || []).map((c: any) => (
+            {categoriasAtivas.map((c: any) => (
               <option key={c.id} value={c.id}>{c.nome}</option>
             ))}
           </select>

@@ -14,6 +14,7 @@ import FornecedoresPage from '@/pages/fornecedores/FornecedoresPage';
 import ComprasPage from '@/pages/compras/ComprasPage';
 import RelatoriosPage from '@/pages/relatorios/RelatoriosPage';
 import VendasPage from '@/pages/pdv/VendasPage';
+import CategoriasPage from '@/pages/categorias/CategoriasPage';
 import UsuariosPage from '@/pages/usuarios/UsuariosPage';
 import ConfiguracoesPage from '@/pages/configuracoes/ConfiguracoesPage';
 import AcessoNegadoPage from '@/pages/auth/AcessoNegadoPage';
@@ -155,6 +156,14 @@ export default function App() {
             element={
               <PerfilRoute perfis={['ADMINISTRADOR', 'GERENTE']}>
                 <FornecedoresPage />
+              </PerfilRoute>
+            }
+          />
+          <Route
+            path="categorias"
+            element={
+              <PerfilRoute perfis={['ADMINISTRADOR', 'GERENTE']}>
+                <CategoriasPage />
               </PerfilRoute>
             }
           />

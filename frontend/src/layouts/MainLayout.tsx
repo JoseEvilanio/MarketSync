@@ -11,6 +11,7 @@ const pageTitles: Record<string, string> = {
   '/caixa':        'Caixa',
   '/clientes':     'Clientes',
   '/fornecedores': 'Fornecedores',
+  '/categorias':   'Categorias',
   '/compras':      'Compras',
   '/relatorios':   'Relatórios',
   '/vendas':       'Histórico de Vendas',

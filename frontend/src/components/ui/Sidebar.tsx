@@ -24,6 +24,7 @@ const navItems: NavItem[] = [
   // Admin + Gerente
   { to: '/clientes',     icon: 'group',                  label: 'Clientes',     perfis: ['ADMINISTRADOR', 'GERENTE'] },
   { to: '/fornecedores', icon: 'local_shipping',         label: 'Fornecedores', perfis: ['ADMINISTRADOR', 'GERENTE'] },
+  { to: '/categorias',   icon: 'label',                  label: 'Categorias',   perfis: ['ADMINISTRADOR', 'GERENTE'] },
   { to: '/compras',      icon: 'shopping_cart',          label: 'Compras',      perfis: ['ADMINISTRADOR', 'GERENTE'] },
   { to: '/vendas',       icon: 'receipt_long',           label: 'Vendas',       perfis: ['ADMINISTRADOR', 'GERENTE'] },
   { to: '/relatorios',   icon: 'assessment',             label: 'Relatórios',   perfis: ['ADMINISTRADOR', 'GERENTE'] },
