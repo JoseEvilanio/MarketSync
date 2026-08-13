@@ -3,7 +3,7 @@
  * Abre/fecha caixa, sangria e suprimento sem sair da tela.
  * Quando o caixa está fechado, abre direto no sub-modal de abertura.
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
@@ -26,6 +26,7 @@ type SubModal = 'abrir' | 'fechar' | 'sangria' | 'suprimento' | null;
 export default function ModalCaixa({ open, onClose }: Props) {
   const qc = useQueryClient();
   const [sub, setSub] = useState<SubModal>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const { data: caixa, isLoading } = useQuery({
     queryKey: ['caixa-atual'],
@@ -41,17 +42,28 @@ export default function ModalCaixa({ open, onClose }: Props) {
     }
     if (!open) {
       setSub(null);
+    } else {
+      // Tirar o foco do input do fundo (PDV) e focar o container do modal imediatamente
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+      setTimeout(() => {
+        containerRef.current?.focus();
+      }, 50);
     }
-  }, [open, isLoading, caixa]);
+  }, [open, isLoading, caixa, sub]);
 
   // Atalhos de teclado no modal principal do caixa (1, 2, 3)
   useEffect(() => {
     if (!open || sub !== null) return;
 
     function handleKey(e: KeyboardEvent) {
-      // Ignorar se o foco está em um input/textarea
-      const tag = (e.target as HTMLElement).tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      const active = document.activeElement as HTMLElement;
+      // Se o foco estiver em um input dentro do sub-modal, não interceptar
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) {
+        const isInsideSubModal = active.closest('form');
+        if (isInsideSubModal) return;
+      }
 
       switch (e.key) {
         case '1': e.preventDefault(); if (caixa) setSub('sangria'); break;
@@ -61,8 +73,8 @@ export default function ModalCaixa({ open, onClose }: Props) {
       }
     }
 
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
+    window.addEventListener('keydown', handleKey, true);
+    return () => window.removeEventListener('keydown', handleKey, true);
   }, [open, sub, caixa, onClose]);
 
   const { register: regAbrir, handleSubmit: hsAbrir, reset: rstAbrir } = useForm<any>();
@@ -139,7 +151,7 @@ export default function ModalCaixa({ open, onClose }: Props) {
           </div>
         ) : (
           /* Caixa aberto */
-          <div className="space-y-md">
+          <div ref={containerRef} tabIndex={-1} className="space-y-md outline-none">
             {/* Status */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-sm">
               <div className="card p-md bg-success/10 border-success/20 text-center">
