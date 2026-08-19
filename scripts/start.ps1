@@ -54,4 +54,16 @@ Write-Host "  Frontend:     http://localhost:5173" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  Pressione qualquer tecla para abrir no navegador..."
 $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-Start-Process "http://localhost:5173"
+
+# Abrir no Google Chrome (preferencial) ou fallback para o navegador padrão
+$chromePaths = @(
+    "C:\Program Files\Google\Chrome\Application\chrome.exe",
+    "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+)
+$chrome = $chromePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($chrome) {
+    Start-Process $chrome "http://localhost:5173"
+} else {
+    Start-Process "http://localhost:5173"
+}
